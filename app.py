@@ -6,7 +6,6 @@ from math import radians, sin, cos, sqrt, atan2
 from flask import Flask, request, jsonify, send_from_directory
 
 # ---------- НАСТРОЙКИ ----------
-# URL приложения (можно оставить как переменную окружения для гибкости)
 APP_URL = os.environ.get('APP_URL', 'https://near-gig.onrender.com')
 
 app = Flask(__name__)
@@ -136,7 +135,7 @@ def map_page():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Карта подработок</title>
+        <title>Near Gig – подработки рядом</title>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
         <link rel="manifest" href="/manifest.json">
@@ -147,10 +146,9 @@ def map_page():
 
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <!-- Плагин геолокации для кнопки "Моё местоположение" -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.css" />
         <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.js"></script>
-        <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
-        <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
         <style>
             #map { height: 100vh; width: 100%; }
             .panel {
@@ -160,6 +158,38 @@ def map_page():
                 display: flex; gap: 5px; flex-wrap: wrap;
             }
             .panel input, .panel select, .panel button { font-size: 14px; }
+            .locate-btn {
+                position: absolute; top: 10px; left: 10px; z-index: 1000;
+                background: white; padding: 5px 10px; border-radius: 5px;
+                box-shadow: 0 0 5px rgba(0,0,0,0.3); cursor: pointer;
+                font-size: 16px; border: none;
+            }
+            /* Поисковая строка */
+            .search-container {
+                position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+                z-index: 1000; background: white; border-radius: 5px;
+                box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex;
+                padding: 0; overflow: hidden;
+            }
+            .search-container input {
+                border: none; padding: 8px; width: 200px; font-size: 14px;
+                outline: none;
+            }
+            .search-container button {
+                border: none; background: #2196F3; color: white; padding: 8px 12px;
+                cursor: pointer; font-size: 14px;
+            }
+            .search-results {
+                position: absolute; top: 45px; left: 50%; transform: translateX(-50%);
+                z-index: 1001; background: white; border-radius: 5px;
+                box-shadow: 0 0 10px rgba(0,0,0,0.3);
+                max-height: 200px; overflow-y: auto; width: 280px;
+                display: none;
+            }
+            .search-results div {
+                padding: 8px; cursor: pointer; border-bottom: 1px solid #eee;
+            }
+            .search-results div:hover { background: #f0f0f0; }
         </style>
     </head>
     <body>
@@ -177,7 +207,17 @@ def map_page():
             <button id="filterBtn">Искать</button>
         </div>
         <button id="addBtn" style="position:absolute; top:10px; right:10px; z-index:1000; padding:10px; background:green; color:white; border:none; border-radius:5px;">+</button>
+
+        <!-- Поиск адреса -->
+        <div class="search-container">
+            <input type="text" id="searchInput" placeholder="Поиск адреса...">
+            <button id="searchBtn">🔍</button>
+        </div>
+        <div class="search-results" id="searchResults"></div>
+
         <div id="map"></div>
+
+        <!-- Форма добавления -->
         <div id="formContainer" style="display:none; position:absolute; top:50px; right:10px; background:white; padding:15px; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.3); z-index:1000;">
             <input type="text" id="title" placeholder="Название" style="width:100%; margin-bottom:5px;"><br>
             <input type="text" id="description" placeholder="Описание" style="width:100%; margin-bottom:5px;"><br>
@@ -193,47 +233,182 @@ def map_page():
             <button id="saveBtn">Сохранить</button>
             <button id="cancelBtn">Отмена</button>
         </div>
+
+        <!-- Ручная кнопка геолокации -->
+        <button id="manualLocateBtn" class="locate-btn" title="Моё местоположение">📍</button>
+
         <script>
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(reg => console.log('Service Worker зарегистрирован'))
-                    .catch(err => console.log('Ошибка регистрации Service Worker:', err));
-            }
+            // ---------- КЛЮЧИ ЯНДЕКСА ----------
+            var YANDEX_MAP_KEY = '27ec90a8-477d-41ac-a054-ba4bdd3bd265';
+            var YANDEX_GEOCODER_KEY = 'a1072bf1-5f7e-4d8b-b535-a231feb84cf8';
 
-            var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: '&copy; Esri'
-            });
-            var labels = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                opacity: 0.6,
-                attribution: '&copy; OpenStreetMap contributors'
-            });
-            var hybrid = L.layerGroup([satellite, labels]);
-            var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; OpenStreetMap contributors'
+            // ---------- КАРТА ----------
+            var yandexMap = L.tileLayer(
+                'https://core-renderer-tiles.maps.yandex.net/tiles?l=map&v=25.03.01-0~b:250311111111&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
+                {
+                    attribution: '&copy; <a href="https://yandex.ru/maps/">Яндекс.Карты</a>',
+                    apiKey: YANDEX_MAP_KEY
+                }
+            );
+            var yandexHybrid = L.tileLayer(
+                'https://core-renderer-tiles.maps.yandex.net/tiles?l=sat,skl&v=25.03.01-0~b:250311111111&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
+                {
+                    attribution: '&copy; <a href="https://yandex.ru/maps/">Яндекс.Карты</a>',
+                    apiKey: YANDEX_MAP_KEY
+                }
+            );
+
+            var map = L.map('map', {
+                layers: [yandexHybrid],
+                center: [55.7558, 37.6173],
+                zoom: 12
             });
 
-            var map = L.map('map', { layers: [hybrid] }).setView([55.7558, 37.6173], 12);
-            var baseMaps = { "Схема": streets, "Гибрид": hybrid };
+            var baseMaps = { "Схема": yandexMap, "Гибрид": yandexHybrid };
             L.control.layers(baseMaps).addTo(map);
 
-            L.control.locate({ position: 'topleft', strings: { title: 'Моё местоположение' } }).addTo(map);
-
-            L.Control.geocoder({ defaultMarkGeocode: false }).on('markgeocode', function(e) {
-                var latlng = e.geocode.center;
-                L.marker(latlng).addTo(map).bindPopup(e.geocode.name).openPopup();
-                map.setView(latlng, 15);
+            // Геолокация (плагин)
+            var lc = L.control.locate({
+                position: 'topleft',
+                strings: { title: 'Моё местоположение' },
+                locateOptions: { enableHighAccuracy: true }
             }).addTo(map);
 
-            var selectedLatLng = null, tempMarker = null;
-            map.on('click', function(e) {
-                if (tempMarker) map.removeLayer(tempMarker);
-                tempMarker = L.marker(e.latlng).addTo(map).bindPopup('Выбрано здесь').openPopup();
-                selectedLatLng = e.latlng;
+            // ---------- КАСТОМНЫЙ ПОИСК АДРЕСОВ ЧЕРЕЗ ЯНДЕКС.ГЕОКОДЕР ----------
+            var searchInput = document.getElementById('searchInput');
+            var searchBtn = document.getElementById('searchBtn');
+            var searchResults = document.getElementById('searchResults');
+
+            function searchYandexGeocode(query) {
+                var url = 'https://geocode-maps.yandex.ru/1.x/?format=json&apikey=' + YANDEX_GEOCODER_KEY +
+                          '&geocode=' + encodeURIComponent(query) + '&lang=ru_RU&results=5';
+                return fetch(url).then(r => r.json());
+            }
+
+            function showSearchResults(items) {
+                searchResults.innerHTML = '';
+                if (!items || items.length === 0) {
+                    searchResults.style.display = 'none';
+                    return;
+                }
+                items.forEach(function(item) {
+                    var div = document.createElement('div');
+                    div.textContent = item.name + ' (' + item.description + ')';
+                    div.addEventListener('click', function() {
+                        var pos = item.point.split(' ');
+                        var lat = parseFloat(pos[1]);
+                        var lng = parseFloat(pos[0]);
+                        map.setView([lat, lng], 15);
+                        // Если форма открыта, обновляем временный маркер
+                        if (document.getElementById('formContainer').style.display === 'block') {
+                            setTempMarker([lat, lng]);
+                        }
+                        searchResults.style.display = 'none';
+                        searchInput.value = '';
+                    });
+                    searchResults.appendChild(div);
+                });
+                searchResults.style.display = 'block';
+            }
+
+            searchBtn.addEventListener('click', function() {
+                var query = searchInput.value.trim();
+                if (!query) return;
+                searchYandexGeocode(query).then(function(data) {
+                    var items = [];
+                    var members = data.response.GeoObjectCollection.featureMember;
+                    members.forEach(function(member) {
+                        var obj = member.GeoObject;
+                        items.push({
+                            name: obj.name,
+                            description: obj.description || '',
+                            point: obj.Point.pos
+                        });
+                    });
+                    showSearchResults(items);
+                });
             });
 
+            // Скрываем результаты при клике вне поиска
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.search-container') && !e.target.closest('#searchResults')) {
+                    searchResults.style.display = 'none';
+                }
+            });
+
+            // ---------- ПЕРЕМЕННЫЕ ФОРМЫ ----------
+            var selectedLatLng = null;
+            var tempMarker = null;
+
+            function setTempMarker(latlng) {
+                if (tempMarker) map.removeLayer(tempMarker);
+                tempMarker = L.marker(latlng).addTo(map)
+                    .bindPopup('Здесь будет ваша подработка').openPopup();
+                selectedLatLng = latlng;
+            }
+
+            // При открытии формы пытаемся получить геолокацию
+            document.getElementById('addBtn').addEventListener('click', function() {
+                document.getElementById('formContainer').style.display = 'block';
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            var lat = position.coords.latitude;
+                            var lng = position.coords.longitude;
+                            setTempMarker([lat, lng]);
+                            map.setView([lat, lng], 15);
+                        },
+                        function(error) {
+                            alert('Не удалось определить ваше местоположение. Выберите точку на карте или воспользуйтесь поиском.');
+                        },
+                        { enableHighAccuracy: true, timeout: 10000 }
+                    );
+                } else {
+                    alert('Геолокация не поддерживается. Выберите точку на карте.');
+                }
+            });
+
+            map.on('click', function(e) {
+                if (document.getElementById('formContainer').style.display === 'block') {
+                    setTempMarker(e.latlng);
+                }
+            });
+
+            document.getElementById('cancelBtn').addEventListener('click', function() {
+                document.getElementById('formContainer').style.display = 'none';
+                if (tempMarker) {
+                    map.removeLayer(tempMarker);
+                    tempMarker = null;
+                    selectedLatLng = null;
+                }
+            });
+
+            document.getElementById('manualLocateBtn').addEventListener('click', function() {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            var lat = position.coords.latitude;
+                            var lng = position.coords.longitude;
+                            map.setView([lat, lng], 15);
+                            if (document.getElementById('formContainer').style.display === 'block') {
+                                setTempMarker([lat, lng]);
+                            }
+                        },
+                        function(error) {
+                            alert('Не удалось определить местоположение.');
+                        }
+                    );
+                } else {
+                    alert('Геолокация не поддерживается.');
+                }
+            });
+
+            // ---------- ЗАГРУЗКА ОБЪЯВЛЕНИЙ ----------
             function loadJobs(filters = {}) {
                 map.eachLayer(function(layer) {
-                    if (layer instanceof L.Marker && layer !== tempMarker) map.removeLayer(layer);
+                    if (layer instanceof L.Marker && layer !== tempMarker) {
+                        map.removeLayer(layer);
+                    }
                 });
                 var params = new URLSearchParams(filters).toString();
                 fetch('/get_jobs?' + params)
@@ -291,41 +466,55 @@ def map_page():
                 return f;
             }
 
-            var addBtn = document.getElementById('addBtn');
-            var formContainer = document.getElementById('formContainer');
-            var saveBtn = document.getElementById('saveBtn');
-            var cancelBtn = document.getElementById('cancelBtn');
-
-            addBtn.onclick = () => formContainer.style.display = 'block';
-            cancelBtn.onclick = () => {
-                formContainer.style.display = 'none';
-                if (tempMarker) { map.removeLayer(tempMarker); tempMarker = null; selectedLatLng = null; }
-            };
-
-            saveBtn.onclick = function() {
+            // ---------- СОХРАНЕНИЕ ----------
+            document.getElementById('saveBtn').addEventListener('click', function() {
                 var title = document.getElementById('title').value;
                 var desc = document.getElementById('description').value;
                 var price = document.getElementById('price').value;
                 var cat = document.getElementById('category').value;
                 var days = document.getElementById('daysValid').value;
-                if (!title || !price || !selectedLatLng) { alert('Заполните поля и выберите точку на карте'); return; }
+
+                if (!title || !price) {
+                    alert('Введите название и оплату');
+                    return;
+                }
+                if (!selectedLatLng) {
+                    alert('Сначала выберите место на карте (или разрешите геолокацию)');
+                    return;
+                }
+
                 fetch('/add_job', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        title, description: desc, price: parseFloat(price),
-                        lat: selectedLatLng.lat, lng: selectedLatLng.lng,
-                        category: cat, days_valid: parseInt(days)
+                        title: title,
+                        description: desc,
+                        price: parseFloat(price),
+                        lat: selectedLatLng.lat,
+                        lng: selectedLatLng.lng,
+                        category: cat,
+                        days_valid: parseInt(days)
                     })
                 })
                 .then(r => r.json())
                 .then(() => {
                     alert('Объявление добавлено!');
-                    formContainer.style.display = 'none';
-                    if (tempMarker) { map.removeLayer(tempMarker); tempMarker = null; selectedLatLng = null; }
+                    document.getElementById('formContainer').style.display = 'none';
+                    if (tempMarker) {
+                        map.removeLayer(tempMarker);
+                        tempMarker = null;
+                        selectedLatLng = null;
+                    }
                     loadJobs(getCurrentFilters());
                 });
-            };
+            });
+
+            // PWA Service Worker
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('SW registered'))
+                    .catch(err => console.log('SW error', err));
+            }
         </script>
     </body>
     </html>
