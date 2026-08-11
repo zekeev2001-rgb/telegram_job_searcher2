@@ -14,7 +14,6 @@ app = Flask(__name__)
 def init_db():
     conn = sqlite3.connect('jobs.db')
     c = conn.cursor()
-    # Создаём таблицу, если её нет
     c.execute('''
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,7 +28,6 @@ def init_db():
             likes INTEGER DEFAULT 0
         )
     ''')
-    # Добавляем колонки, если их нет (для совместимости со старыми базами)
     try:
         c.execute('ALTER TABLE jobs ADD COLUMN category TEXT DEFAULT "Другое"')
     except sqlite3.OperationalError:
@@ -48,6 +46,7 @@ def init_db():
         pass
     conn.commit()
     conn.close()
+
 init_db()
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
@@ -145,7 +144,7 @@ def like_job():
     conn.close()
     return jsonify({'status': 'ok'})
 
-# ---------- ГЛАВНАЯ СТРАНИЦА ----------
+# ---------- ГЛАВНАЯ СТРАНИЦА (v2 - Яндекс.Карты) ----------
 @app.route('/')
 def map_page():
     return '''
@@ -155,7 +154,12 @@ def map_page():
         <title>Near Gig – подработки рядом</title>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <link rel="manifest" href="/manifest.json">
+        <!-- ОТКЛЮЧАЕМ КЭШ (чтобы точно загрузилась новая версия) -->
+        <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+        <meta http-equiv="Pragma" content="no-cache" />
+        <meta http-equiv="Expires" content="0" />
+
+        <link rel="manifest" href="/manifest.json?v=2">
         <meta name="theme-color" content="#2196F3">
         <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1041/1041916.png">
         <meta name="apple-mobile-web-app-capable" content="yes">
@@ -163,7 +167,6 @@ def map_page():
 
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <!-- Плагин геолокации для кнопки "Моё местоположение" -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.css" />
         <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.js"></script>
         <style>
@@ -181,7 +184,6 @@ def map_page():
                 box-shadow: 0 0 5px rgba(0,0,0,0.3); cursor: pointer;
                 font-size: 16px; border: none;
             }
-            /* Поисковая строка */
             .search-container {
                 position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
                 z-index: 1000; background: white; border-radius: 5px;
@@ -224,17 +226,12 @@ def map_page():
             <button id="filterBtn">Искать</button>
         </div>
         <button id="addBtn" style="position:absolute; top:10px; right:10px; z-index:1000; padding:10px; background:green; color:white; border:none; border-radius:5px;">+</button>
-
-        <!-- Поиск адреса -->
         <div class="search-container">
             <input type="text" id="searchInput" placeholder="Поиск адреса...">
             <button id="searchBtn">🔍</button>
         </div>
         <div class="search-results" id="searchResults"></div>
-
         <div id="map"></div>
-
-        <!-- Форма добавления -->
         <div id="formContainer" style="display:none; position:absolute; top:50px; right:10px; background:white; padding:15px; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.3); z-index:1000;">
             <input type="text" id="title" placeholder="Название" style="width:100%; margin-bottom:5px;"><br>
             <input type="text" id="description" placeholder="Описание" style="width:100%; margin-bottom:5px;"><br>
@@ -250,16 +247,12 @@ def map_page():
             <button id="saveBtn">Сохранить</button>
             <button id="cancelBtn">Отмена</button>
         </div>
-
-        <!-- Ручная кнопка геолокации -->
         <button id="manualLocateBtn" class="locate-btn" title="Моё местоположение">📍</button>
 
         <script>
-            // ---------- КЛЮЧИ ЯНДЕКСА ----------
             var YANDEX_MAP_KEY = '27ec90a8-477d-41ac-a054-ba4bdd3bd265';
             var YANDEX_GEOCODER_KEY = 'a1072bf1-5f7e-4d8b-b535-a231feb84cf8';
 
-            // ---------- КАРТА ----------
             var yandexMap = L.tileLayer(
                 'https://core-renderer-tiles.maps.yandex.net/tiles?l=map&v=25.03.01-0~b:250311111111&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
                 {
@@ -284,14 +277,12 @@ def map_page():
             var baseMaps = { "Схема": yandexMap, "Гибрид": yandexHybrid };
             L.control.layers(baseMaps).addTo(map);
 
-            // Геолокация (плагин)
             var lc = L.control.locate({
                 position: 'topleft',
                 strings: { title: 'Моё местоположение' },
                 locateOptions: { enableHighAccuracy: true }
             }).addTo(map);
 
-            // ---------- КАСТОМНЫЙ ПОИСК АДРЕСОВ ЧЕРЕЗ ЯНДЕКС.ГЕОКОДЕР ----------
             var searchInput = document.getElementById('searchInput');
             var searchBtn = document.getElementById('searchBtn');
             var searchResults = document.getElementById('searchResults');
@@ -316,7 +307,6 @@ def map_page():
                         var lat = parseFloat(pos[1]);
                         var lng = parseFloat(pos[0]);
                         map.setView([lat, lng], 15);
-                        // Если форма открыта, обновляем временный маркер
                         if (document.getElementById('formContainer').style.display === 'block') {
                             setTempMarker([lat, lng]);
                         }
@@ -346,14 +336,12 @@ def map_page():
                 });
             });
 
-            // Скрываем результаты при клике вне поиска
             document.addEventListener('click', function(e) {
                 if (!e.target.closest('.search-container') && !e.target.closest('#searchResults')) {
                     searchResults.style.display = 'none';
                 }
             });
 
-            // ---------- ПЕРЕМЕННЫЕ ФОРМЫ ----------
             var selectedLatLng = null;
             var tempMarker = null;
 
@@ -364,7 +352,6 @@ def map_page():
                 selectedLatLng = latlng;
             }
 
-            // При открытии формы пытаемся получить геолокацию
             document.getElementById('addBtn').addEventListener('click', function() {
                 document.getElementById('formContainer').style.display = 'block';
                 if (navigator.geolocation) {
@@ -420,7 +407,6 @@ def map_page():
                 }
             });
 
-            // ---------- ЗАГРУЗКА ОБЪЯВЛЕНИЙ ----------
             function loadJobs(filters = {}) {
                 map.eachLayer(function(layer) {
                     if (layer instanceof L.Marker && layer !== tempMarker) {
@@ -483,7 +469,6 @@ def map_page():
                 return f;
             }
 
-            // ---------- СОХРАНЕНИЕ ----------
             document.getElementById('saveBtn').addEventListener('click', function() {
                 var title = document.getElementById('title').value;
                 var desc = document.getElementById('description').value;
@@ -526,11 +511,13 @@ def map_page():
                 });
             });
 
-            // PWA Service Worker
+            // ОТКЛЮЧАЕМ Service Worker, чтобы он не кэшировал старую версию
             if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(reg => console.log('SW registered'))
-                    .catch(err => console.log('SW error', err));
+                navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                    for(let registration of registrations) {
+                        registration.unregister();
+                    }
+                });
             }
         </script>
     </body>
