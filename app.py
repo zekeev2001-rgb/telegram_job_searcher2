@@ -14,6 +14,7 @@ app = Flask(__name__)
 def init_db():
     conn = sqlite3.connect('jobs.db')
     c = conn.cursor()
+    # Создаём таблицу, если её нет
     c.execute('''
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,9 +29,25 @@ def init_db():
             likes INTEGER DEFAULT 0
         )
     ''')
+    # Добавляем колонки, если их нет (для совместимости со старыми базами)
+    try:
+        c.execute('ALTER TABLE jobs ADD COLUMN category TEXT DEFAULT "Другое"')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute('ALTER TABLE jobs ADD COLUMN created_at TEXT')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute('ALTER TABLE jobs ADD COLUMN expires_at TEXT')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute('ALTER TABLE jobs ADD COLUMN likes INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
-
 init_db()
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
