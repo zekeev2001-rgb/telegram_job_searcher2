@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import telebot
 from telebot import types
 
@@ -75,6 +75,15 @@ def webhook():
         bot.process_new_updates([update])
         return 'OK', 200
     return 'Bad request', 403
+
+# ---------- СТАТИЧЕСКИЕ ФАЙЛЫ ДЛЯ PWA ----------
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('.', 'manifest.json')
+
+@app.route('/sw.js')
+def service_worker():
+    return send_from_directory('.', 'sw.js')
 
 # ---------- API ДЛЯ КАРТЫ ----------
 @app.route('/get_jobs')
@@ -153,7 +162,7 @@ def like_job():
     conn.close()
     return jsonify({'status': 'ok'})
 
-# ---------- ГЛАВНАЯ СТРАНИЦА (ИСПРАВЛЕННАЯ) ----------
+# ---------- ГЛАВНАЯ СТРАНИЦА (PWA READY) ----------
 @app.route('/')
 def map_page():
     return '''
@@ -162,7 +171,16 @@ def map_page():
     <head>
         <title>Карта подработок</title>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <!-- PWA Manifest -->
+        <link rel="manifest" href="/manifest.json">
+        <!-- Тема оформления (цвет заголовка) -->
+        <meta name="theme-color" content="#2196F3">
+        <!-- Для iOS: иконка на главный экран -->
+        <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1041/1041916.png">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.css" />
@@ -212,20 +230,22 @@ def map_page():
             <button id="cancelBtn">Отмена</button>
         </div>
         <script>
+            // Регистрация Service Worker
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('Service Worker зарегистрирован'))
+                    .catch(err => console.log('Ошибка регистрации Service Worker:', err));
+            }
+
             // ---------- НАСТРОЙКА СЛОЁВ ----------
-            // Спутниковая подложка (Esri)
             var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: '&copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+                attribution: '&copy; Esri'
             });
-            // Подписи (OpenStreetMap) с прозрачностью – они наложатся поверх спутника
             var labels = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 opacity: 0.6,
                 attribution: '&copy; OpenStreetMap contributors'
             });
-            // Гибрид = спутник + подписи
             var hybrid = L.layerGroup([satellite, labels]);
-
-            // Обычная схема (OpenStreetMap)
             var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors'
             });
@@ -234,10 +254,8 @@ def map_page():
             var baseMaps = { "Схема": streets, "Гибрид": hybrid };
             L.control.layers(baseMaps).addTo(map);
 
-            // Геолокация
             L.control.locate({ position: 'topleft', strings: { title: 'Моё местоположение' } }).addTo(map);
 
-            // Поиск адреса
             L.Control.geocoder({ defaultMarkGeocode: false }).on('markgeocode', function(e) {
                 var latlng = e.geocode.center;
                 L.marker(latlng).addTo(map).bindPopup(e.geocode.name).openPopup();
@@ -251,7 +269,6 @@ def map_page():
                 selectedLatLng = e.latlng;
             });
 
-            // ---------- ЗАГРУЗКА ДАННЫХ ----------
             function loadJobs(filters = {}) {
                 map.eachLayer(function(layer) {
                     if (layer instanceof L.Marker && layer !== tempMarker) map.removeLayer(layer);
@@ -312,7 +329,6 @@ def map_page():
                 return f;
             }
 
-            // ---------- ФОРМА ДОБАВЛЕНИЯ ----------
             var addBtn = document.getElementById('addBtn');
             var formContainer = document.getElementById('formContainer');
             var saveBtn = document.getElementById('saveBtn');
