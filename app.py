@@ -1,20 +1,25 @@
 import sqlite3
 import os
+from datetime import datetime, timedelta
+from math import radians, sin, cos, sqrt, atan2
+
 from flask import Flask, request, jsonify
 import telebot
 from telebot import types
 
 # ---------- НАСТРОЙКИ ----------
-TOKEN = os.environ.get('TOKEN', 'ТВОЙ_ТОКЕН_СЮДА')  # токен бота (лучше через переменную окружения)
-WEBHOOK_PATH = '/webhook'  # путь, по которому Telegram будет слать обновления
+TOKEN = os.environ.get('TOKEN', 'твой_токен')
+WEB_APP_URL = os.environ.get('WEB_APP_URL', 'https://telegram-job-searcher.onrender.com')
+WEBHOOK_PATH = '/webhook'
 
-# ---------- FLASK ПРИЛОЖЕНИЕ ----------
 app = Flask(__name__)
+bot = telebot.TeleBot(TOKEN)
 
 # ---------- БАЗА ДАННЫХ ----------
 def init_db():
     conn = sqlite3.connect('jobs.db')
     c = conn.cursor()
+    # Таблица подработок
     c.execute('''
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,7 +27,21 @@ def init_db():
             description TEXT,
             price REAL,
             lat REAL,
-            lng REAL
+            lng REAL,
+            category TEXT DEFAULT 'Другое',
+            created_at TEXT,
+            expires_at TEXT,
+            likes INTEGER DEFAULT 0
+        )
+    ''')
+    # Таблица подписчиков (для уведомлений – пока не используется, но на будущее)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS subscribers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id TEXT,
+            lat REAL,
+            lng REAL,
+            radius REAL
         )
     ''')
     conn.commit()
@@ -30,24 +49,28 @@ def init_db():
 
 init_db()
 
-# ---------- TELEGRAM БОТ ----------
-bot = telebot.TeleBot(TOKEN)
+# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
+def haversine(lat1, lng1, lat2, lng2):
+    """Расстояние между двумя точками в километрах"""
+    R = 6371.0
+    dlat = radians(lat2 - lat1)
+    dlng = radians(lng2 - lng1)
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng/2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1-a))
+    return R * c
 
-# Команда /start – отправляет кнопку с Web App
+# ---------- TELEGRAM БОТ ----------
 @bot.message_handler(commands=['start'])
 def start(message):
-    # Здесь нужно указать ПУБЛИЧНЫЙ URL вашего Render-приложения
-    # Пока поставим заглушку, заменим после деплоя
-    web_app_url = os.environ.get('WEB_APP_URL', 'https://your-app.onrender.com')
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton(
         text='Открыть карту подработок',
-        web_app=types.WebAppInfo(url=web_app_url)
+        web_app=types.WebAppInfo(url=WEB_APP_URL)
     )
     markup.add(btn)
     bot.send_message(message.chat.id, 'Привет! Нажми кнопку, чтобы открыть карту.', reply_markup=markup)
 
-# Маршрут для вебхука Telegram
+# Вебхук
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -57,36 +80,87 @@ def webhook():
         return 'OK', 200
     return 'Bad request', 403
 
-# ---------- МАРШРУТЫ ДЛЯ КАРТЫ (как и раньше) ----------
+# ---------- API ДЛЯ КАРТЫ ----------
 @app.route('/get_jobs')
 def get_jobs():
+    category = request.args.get('category')
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    radius = request.args.get('radius', type=float)  # км
     max_price = request.args.get('max_price', type=float)
+
     conn = sqlite3.connect('jobs.db')
     c = conn.cursor()
+    query = 'SELECT id, title, description, price, lat, lng, category, created_at, expires_at, likes FROM jobs WHERE (expires_at IS NULL OR expires_at > ?)'
+    params = [datetime.now().isoformat()]
+
+    if category:
+        query += ' AND category = ?'
+        params.append(category)
     if max_price is not None:
-        c.execute('SELECT id, title, description, price, lat, lng FROM jobs WHERE price <= ?', (max_price,))
-    else:
-        c.execute('SELECT id, title, description, price, lat, lng FROM jobs')
+        query += ' AND price <= ?'
+        params.append(max_price)
+
+    c.execute(query, params)
     rows = c.fetchall()
     conn.close()
-    jobs = [{'id': r[0], 'title': r[1], 'description': r[2], 'price': r[3], 'lat': r[4], 'lng': r[5]} for r in rows]
+
+    jobs = []
+    for r in rows:
+        job = {
+            'id': r[0], 'title': r[1], 'description': r[2], 'price': r[3],
+            'lat': r[4], 'lng': r[5], 'category': r[6],
+            'created_at': r[7], 'expires_at': r[8], 'likes': r[9]
+        }
+        # Фильтр по радиусу, если заданы координаты
+        if lat is not None and lng is not None and radius is not None:
+            dist = haversine(lat, lng, job['lat'], job['lng'])
+            if dist <= radius:
+                job['distance'] = round(dist, 2)
+                jobs.append(job)
+        else:
+            jobs.append(job)
+
     return jsonify(jobs)
 
 @app.route('/add_job', methods=['POST'])
 def add_job():
     data = request.get_json()
+    title = data['title']
+    description = data.get('description', '')
+    price = data['price']
+    lat = data['lat']
+    lng = data['lng']
+    category = data.get('category', 'Другое')
+    days_valid = data.get('days_valid', 30)  # срок действия в днях
+
+    created_at = datetime.now().isoformat()
+    expires_at = (datetime.now() + timedelta(days=days_valid)).isoformat()
+
     conn = sqlite3.connect('jobs.db')
     c = conn.cursor()
-    c.execute('INSERT INTO jobs (title, description, price, lat, lng) VALUES (?,?,?,?,?)',
-              (data['title'], data.get('description', ''), data['price'], data['lat'], data['lng']))
+    c.execute('''INSERT INTO jobs (title, description, price, lat, lng, category, created_at, expires_at, likes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)''',
+              (title, description, price, lat, lng, category, created_at, expires_at))
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'}), 201
 
+@app.route('/like_job', methods=['POST'])
+def like_job():
+    data = request.get_json()
+    job_id = data['id']
+    conn = sqlite3.connect('jobs.db')
+    c = conn.cursor()
+    c.execute('UPDATE jobs SET likes = likes + 1 WHERE id = ?', (job_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+# ---------- ГЛАВНАЯ СТРАНИЦА С КАРТОЙ ----------
 @app.route('/')
 def map_page():
-    # (тот же HTML, что и в предыдущей версии, без изменений)
-    html = '''
+    return '''
     <!DOCTYPE html>
     <html>
     <head>
@@ -95,92 +169,190 @@ def map_page():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <!-- Плагин геолокации -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.css" />
+        <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.js"></script>
+        <!-- Плагин поиска адресов -->
+        <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+        <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
         <style>
             #map { height: 100vh; width: 100%; }
             .panel {
                 position: absolute; top: 10px; left: 50px; z-index: 1000;
                 background: white; padding: 8px; border-radius: 5px;
                 box-shadow: 0 0 5px rgba(0,0,0,0.3);
-                display: flex; gap: 5px;
+                display: flex; gap: 5px; flex-wrap: wrap;
             }
+            .panel input, .panel select, .panel button { font-size: 14px; }
         </style>
     </head>
     <body>
+        <!-- Панель фильтров -->
         <div class="panel">
+            <select id="categoryFilter">
+                <option value="">Все категории</option>
+                <option>Курьер</option>
+                <option>Уборка</option>
+                <option>Ремонт</option>
+                <option>IT</option>
+                <option>Другое</option>
+            </select>
             <input type="number" id="maxPrice" placeholder="Макс. цена" style="width: 90px;">
-            <button id="filterBtn">Показать</button>
+            <input type="number" id="radius" placeholder="Радиус, км" style="width: 90px;">
+            <button id="filterBtn">Искать</button>
         </div>
+
         <button id="addBtn" style="position:absolute; top:10px; right:10px; z-index:1000; padding:10px; background:green; color:white; border:none; border-radius:5px;">+</button>
+
         <div id="map"></div>
+
+        <!-- Форма добавления -->
         <div id="formContainer" style="display:none; position:absolute; top:50px; right:10px; background:white; padding:15px; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.3); z-index:1000;">
             <input type="text" id="title" placeholder="Название" style="width:100%; margin-bottom:5px;"><br>
             <input type="text" id="description" placeholder="Описание" style="width:100%; margin-bottom:5px;"><br>
             <input type="number" id="price" placeholder="Оплата, руб" style="width:100%; margin-bottom:5px;"><br>
+            <select id="category">
+                <option>Курьер</option>
+                <option>Уборка</option>
+                <option>Ремонт</option>
+                <option>IT</option>
+                <option>Другое</option>
+            </select><br><br>
+            <input type="number" id="daysValid" placeholder="Актуально дней" value="30" style="width:100%;"><br><br>
             <button id="saveBtn">Сохранить</button>
             <button id="cancelBtn">Отмена</button>
         </div>
+
         <script>
-            var map = L.map('map').setView([55.7558, 37.6173], 12);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            // ---------- КАРТА ----------
+            var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+            var hybrid = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
+            var map = L.map('map', { layers: [hybrid] }).setView([55.7558, 37.6173], 12);
+            var baseMaps = { "Схема": streets, "Спутник": hybrid };
+            L.control.layers(baseMaps).addTo(map);
+
+            // Геолокация
+            L.control.locate({ position: 'topleft', strings: { title: 'Моё местоположение' } }).addTo(map);
+
+            // Поиск адреса
+            L.Control.geocoder({ defaultMarkGeocode: false }).on('markgeocode', function(e) {
+                var latlng = e.geocode.center;
+                L.marker(latlng).addTo(map).bindPopup(e.geocode.name).openPopup();
+                map.setView(latlng, 15);
+            }).addTo(map);
+
             var selectedLatLng = null, tempMarker = null;
+
             map.on('click', function(e) {
                 if (tempMarker) map.removeLayer(tempMarker);
                 tempMarker = L.marker(e.latlng).addTo(map).bindPopup('Выбрано здесь').openPopup();
                 selectedLatLng = e.latlng;
             });
-            function loadJobs(maxPrice) {
+
+            // ---------- ФУНКЦИИ ----------
+            function loadJobs(filters = {}) {
+                // Удаляем старые маркеры
                 map.eachLayer(function(layer) {
                     if (layer instanceof L.Marker && layer !== tempMarker) map.removeLayer(layer);
                 });
-                var url = '/get_jobs';
-                if (maxPrice) url += '?max_price=' + maxPrice;
-                fetch(url).then(r=>r.json()).then(jobs => {
-                    jobs.forEach(job => {
-                        L.marker([job.lat, job.lng]).addTo(map)
-                            .bindPopup('<b>' + job.title + '</b><br>' + job.description + '<br>Цена: ' + job.price + ' руб.');
+                var params = new URLSearchParams(filters).toString();
+                fetch('/get_jobs?' + params)
+                    .then(r => r.json())
+                    .then(jobs => {
+                        jobs.forEach(job => {
+                            var popup = '<b>' + job.title + '</b><br>' +
+                                        job.description + '<br>' +
+                                        'Цена: ' + job.price + ' руб.<br>' +
+                                        'Категория: ' + job.category + '<br>' +
+                                        '❤️ ' + job.likes +
+                                        ' <button onclick="likeJob(' + job.id + ')">Нравится</button>';
+                            if (job.distance) popup += '<br>Расстояние: ' + job.distance + ' км';
+                            L.marker([job.lat, job.lng]).addTo(map).bindPopup(popup);
+                        });
                     });
-                });
             }
             loadJobs();
-            document.getElementById('filterBtn').onclick = function() {
-                var mp = document.getElementById('maxPrice').value;
-                loadJobs(mp || undefined);
+
+            // Лайк
+            window.likeJob = function(id) {
+                fetch('/like_job', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: id })
+                }).then(() => loadJobs(getCurrentFilters()));
             };
+
+            // Применить фильтры
+            document.getElementById('filterBtn').onclick = function() {
+                var filters = {};
+                var cat = document.getElementById('categoryFilter').value;
+                var mp = document.getElementById('maxPrice').value;
+                var rad = document.getElementById('radius').value;
+                if (cat) filters.category = cat;
+                if (mp) filters.max_price = mp;
+                if (rad) {
+                    var center = map.getCenter();
+                    filters.lat = center.lat;
+                    filters.lng = center.lng;
+                    filters.radius = rad;
+                }
+                loadJobs(filters);
+            };
+
+            function getCurrentFilters() {
+                var f = {};
+                var cat = document.getElementById('categoryFilter').value;
+                var mp = document.getElementById('maxPrice').value;
+                var rad = document.getElementById('radius').value;
+                if (cat) f.category = cat;
+                if (mp) f.max_price = mp;
+                if (rad) {
+                    var c = map.getCenter();
+                    f.lat = c.lat; f.lng = c.lng; f.radius = rad;
+                }
+                return f;
+            }
+
+            // ---------- ФОРМА ДОБАВЛЕНИЯ ----------
             var addBtn = document.getElementById('addBtn');
             var formContainer = document.getElementById('formContainer');
             var saveBtn = document.getElementById('saveBtn');
             var cancelBtn = document.getElementById('cancelBtn');
-            addBtn.onclick = function() { formContainer.style.display = 'block'; };
-            cancelBtn.onclick = function() {
+
+            addBtn.onclick = () => formContainer.style.display = 'block';
+            cancelBtn.onclick = () => {
                 formContainer.style.display = 'none';
                 if (tempMarker) { map.removeLayer(tempMarker); tempMarker = null; selectedLatLng = null; }
             };
+
             saveBtn.onclick = function() {
                 var title = document.getElementById('title').value;
                 var desc = document.getElementById('description').value;
                 var price = document.getElementById('price').value;
-                if (!title || !price) { alert('Введи название и оплату'); return; }
-                if (!selectedLatLng) { alert('Сначала кликни по карте, чтобы выбрать место!'); return; }
+                var cat = document.getElementById('category').value;
+                var days = document.getElementById('daysValid').value;
+                if (!title || !price || !selectedLatLng) { alert('Заполните поля и выберите точку на карте'); return; }
                 fetch('/add_job', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({title:title, description:desc, price:parseFloat(price), lat:selectedLatLng.lat, lng:selectedLatLng.lng})
-                }).then(r=>r.json()).then(() => {
-                    L.marker([selectedLatLng.lat, selectedLatLng.lng]).addTo(map)
-                        .bindPopup('<b>' + title + '</b><br>' + desc + '<br>Цена: ' + price + ' руб.');
-                    document.getElementById('title').value = '';
-                    document.getElementById('description').value = '';
-                    document.getElementById('price').value = '';
+                    body: JSON.stringify({
+                        title, description: desc, price: parseFloat(price),
+                        lat: selectedLatLng.lat, lng: selectedLatLng.lng,
+                        category: cat, days_valid: parseInt(days)
+                    })
+                })
+                .then(r => r.json())
+                .then(() => {
+                    alert('Объявление добавлено!');
                     formContainer.style.display = 'none';
                     if (tempMarker) { map.removeLayer(tempMarker); tempMarker = null; selectedLatLng = null; }
+                    loadJobs(getCurrentFilters());
                 });
             };
         </script>
     </body>
     </html>
     '''
-    return html
 
-# ---------- ЗАПУСК ----------
 if __name__ == '__main__':
     app.run(debug=True)
