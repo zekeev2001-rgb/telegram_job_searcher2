@@ -4,7 +4,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
-from flask import Flask, request, jsonify, make_response, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 
 APP_URL = os.environ.get('APP_URL', 'https://near-gig.onrender.com')
 app = Flask(__name__)
@@ -24,7 +24,7 @@ def init_db():
         password_hash TEXT NOT NULL,
         name TEXT,
         phone TEXT,
-        role TEXT DEFAULT 'executor',  -- executor / customer
+        role TEXT DEFAULT 'executor',
         avatar_url TEXT DEFAULT 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
         rating REAL DEFAULT 0,
         reviews_count INTEGER DEFAULT 0,
@@ -43,7 +43,7 @@ def init_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )''')
     
-    # Таблица подработок (обновлённая)
+    # Таблица подработок
     c.execute('''CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -53,7 +53,7 @@ def init_db():
         lat REAL,
         lng REAL,
         category TEXT DEFAULT 'Другое',
-        status TEXT DEFAULT 'active',  -- active / in_progress / completed / cancelled
+        status TEXT DEFAULT 'active',
         created_at TEXT DEFAULT (datetime('now')),
         expires_at TEXT,
         views INTEGER DEFAULT 0,
@@ -66,7 +66,7 @@ def init_db():
         job_id INTEGER NOT NULL,
         user_id INTEGER NOT NULL,
         message TEXT,
-        status TEXT DEFAULT 'pending',  -- pending / accepted / rejected
+        status TEXT DEFAULT 'pending',
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY(job_id) REFERENCES jobs(id),
         FOREIGN KEY(user_id) REFERENCES users(id)
@@ -106,15 +106,12 @@ init_db()
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 def hash_password(password):
-    """Хеширование пароля"""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def generate_token():
-    """Генерация токена сессии"""
     return secrets.token_hex(32)
 
 def get_user_by_token(token):
-    """Получение пользователя по токену сессии"""
     conn = sqlite3.connect('app.db')
     c = conn.cursor()
     c.execute('''SELECT users.* FROM users 
@@ -131,7 +128,6 @@ def get_user_by_token(token):
     return None
 
 def haversine(lat1, lng1, lat2, lng2):
-    """Расчёт расстояния между координатами в км"""
     R = 6371.0
     dlat = radians(lat2 - lat1)
     dlng = radians(lng2 - lng1)
@@ -144,35 +140,40 @@ def haversine(lat1, lng1, lat2, lng2):
 # ==========================================
 @app.route('/api/register', methods=['POST'])
 def register():
-    """Регистрация нового пользователя"""
     data = request.get_json()
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
     name = data.get('name', '').strip()
     role = data.get('role', 'executor')
     
+    # Проверка обязательных полей
     if not email or not password or not name:
-        return jsonify({'error': 'Заполните все поля'}), 400
+        missing = []
+        if not email: missing.append('email')
+        if not password: missing.append('пароль')
+        if not name: missing.append('имя')
+        return jsonify({'error': f'Заполните поля: {", ".join(missing)}'}), 400
     
     if len(password) < 6:
         return jsonify({'error': 'Пароль должен быть минимум 6 символов'}), 400
     
+    # Проверка формата email
+    if '@' not in email or '.' not in email:
+        return jsonify({'error': 'Некорректный email'}), 400
+    
     conn = sqlite3.connect('app.db')
     c = conn.cursor()
     
-    # Проверка на существование email
     c.execute('SELECT id FROM users WHERE email = ?', (email,))
     if c.fetchone():
         conn.close()
         return jsonify({'error': 'Этот email уже зарегистрирован'}), 409
     
-    # Создание пользователя
     password_hash = hash_password(password)
     c.execute('INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)',
               (email, password_hash, name, role))
     user_id = c.lastrowid
     
-    # Создание сессии
     token = generate_token()
     expires_at = (datetime.now() + timedelta(days=30)).isoformat()
     c.execute('INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
@@ -192,7 +193,6 @@ def register():
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    """Вход пользователя"""
     data = request.get_json()
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
@@ -209,13 +209,11 @@ def login():
         conn.close()
         return jsonify({'error': 'Неверный email или пароль'}), 401
     
-    # Создание новой сессии
     token = generate_token()
     expires_at = (datetime.now() + timedelta(days=30)).isoformat()
     c.execute('INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
               (user[0], token, expires_at))
     
-    # Обновление last_login
     c.execute('UPDATE users SET last_login = datetime("now") WHERE id = ?', (user[0],))
     conn.commit()
     conn.close()
@@ -231,7 +229,6 @@ def login():
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
-    """Выход из системы"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     conn = sqlite3.connect('app.db')
     c = conn.cursor()
@@ -242,7 +239,6 @@ def logout():
 
 @app.route('/api/me', methods=['GET'])
 def get_me():
-    """Получение профиля текущего пользователя"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user = get_user_by_token(token)
     if not user:
@@ -251,7 +247,6 @@ def get_me():
 
 @app.route('/api/profile', methods=['PUT'])
 def update_profile():
-    """Обновление профиля"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user = get_user_by_token(token)
     if not user:
@@ -277,7 +272,6 @@ def update_profile():
 # ==========================================
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
-    """Получение списка подработок"""
     category = request.args.get('category')
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
@@ -324,7 +318,6 @@ def get_jobs():
 
 @app.route('/api/jobs', methods=['POST'])
 def create_job():
-    """Создание новой подработки"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user = get_user_by_token(token)
     if not user:
@@ -360,7 +353,6 @@ def create_job():
 # ==========================================
 @app.route('/api/jobs/<int:job_id>/respond', methods=['POST'])
 def respond_to_job(job_id):
-    """Отклик на подработку"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user = get_user_by_token(token)
     if not user:
@@ -383,7 +375,6 @@ def respond_to_job(job_id):
 # ==========================================
 @app.route('/api/reviews', methods=['POST'])
 def create_review():
-    """Создание отзыва"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user = get_user_by_token(token)
     if not user:
@@ -403,7 +394,6 @@ def create_review():
     c.execute('INSERT INTO reviews (from_user_id, to_user_id, job_id, rating, comment) VALUES (?, ?, ?, ?, ?)',
               (user['id'], to_user_id, job_id, rating, comment))
     
-    # Обновление рейтинга пользователя
     c.execute('SELECT AVG(rating), COUNT(*) FROM reviews WHERE to_user_id = ?', (to_user_id,))
     avg_rating, count = c.fetchone()
     c.execute('UPDATE users SET rating = ?, reviews_count = ? WHERE id = ?',
@@ -418,7 +408,6 @@ def create_review():
 # ==========================================
 @app.route('/api/favorites', methods=['GET'])
 def get_favorites():
-    """Получение избранного"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user = get_user_by_token(token)
     if not user:
@@ -437,7 +426,6 @@ def get_favorites():
 
 @app.route('/api/favorites/<int:job_id>', methods=['POST'])
 def toggle_favorite(job_id):
-    """Добавление/удаление из избранного"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user = get_user_by_token(token)
     if not user:
@@ -464,11 +452,41 @@ def toggle_favorite(job_id):
 # ==========================================
 @app.route('/manifest.json')
 def manifest():
-    return send_from_directory('.', 'manifest.json')
+    manifest_data = {
+        "name": "Near Gig – Подработки рядом",
+        "short_name": "Near Gig",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#ffffff",
+        "theme_color": "#6366F1",
+        "icons": [
+            {"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "512x512", "type": "image/png"}
+        ],
+        "lang": "ru-RU"
+    }
+    return jsonify(manifest_data)
 
 @app.route('/sw.js')
 def service_worker():
-    return send_from_directory('.', 'sw.js')
+    return '''const CACHE_NAME = 'near-gig-v2';
+const urlsToCache = ['/'];
+
+self.addEventListener('install', function(event) {
+    event.waitUntil(
+        caches.open(CACHE_NAME).then(function(cache) {
+            return cache.addAll(urlsToCache);
+        })
+    );
+});
+
+self.addEventListener('fetch', function(event) {
+    event.respondWith(
+        caches.match(event.request).then(function(response) {
+            return response || fetch(event.request);
+        })
+    );
+});'''
 
 # ==========================================
 # ГЛАВНАЯ СТРАНИЦА
@@ -494,19 +512,21 @@ def index():
         body { overscroll-behavior: none; }
         .ymaps-2-1-79-ground-pane { filter: grayscale(0); }
         .tab-active { color: #6366F1; border-bottom: 2px solid #6366F1; }
+        .modal-enter { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="bg-white overflow-hidden h-screen">
     <!-- ВЕРХНЯЯ ПАНЕЛЬ -->
-    <div id="header" class="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+    <div id="header" class="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between safe-top">
         <h1 class="text-xl font-bold text-gray-900">Near Gig</h1>
         <div class="flex gap-3">
-            <button id="loginBtn" class="text-sm text-indigo-600 font-medium px-3 py-1 rounded-full border border-indigo-200">Войти</button>
+            <button id="loginBtn" onclick="openAuth()" class="text-sm text-indigo-600 font-medium px-3 py-1 rounded-full border border-indigo-200">Войти</button>
             <div id="userMenu" class="hidden relative">
                 <button id="profileBtn" class="w-9 h-9 rounded-full bg-gray-200 overflow-hidden">
                     <img id="avatarImg" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="w-full h-full object-cover">
                 </button>
-                <div id="dropdownMenu" class="hidden absolute right-0 top-10 bg-white shadow-lg rounded-lg py-2 w-48 border border-gray-100">
+                <div id="dropdownMenu" class="hidden absolute right-0 top-10 bg-white shadow-lg rounded-lg py-2 w-48 border border-gray-100 modal-enter">
                     <button onclick="showProfile()" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Мой профиль</button>
                     <button onclick="showMyJobs()" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Мои заказы</button>
                     <button onclick="showFavorites()" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Избранное</button>
@@ -521,7 +541,7 @@ def index():
     <div id="map" class="w-full h-full"></div>
 
     <!-- НИЖНЕЕ МЕНЮ -->
-    <div class="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-200 px-4 py-2 flex justify-around">
+    <div class="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-200 px-4 py-2 flex justify-around safe-bottom">
         <button onclick="switchTab('map')" id="tabMap" class="tab-active flex flex-col items-center text-xs pb-1">
             <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
             Карта
@@ -540,14 +560,14 @@ def index():
         </button>
     </div>
 
-    <!-- МОДАЛЬНЫЕ ОКНА -->
+    <!-- МОДАЛЬНОЕ ОКНО АВТОРИЗАЦИИ -->
     <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl p-6 w-full max-w-md">
+        <div class="bg-white rounded-2xl p-6 w-full max-w-md modal-enter">
             <h2 class="text-xl font-bold mb-4 text-center" id="authTitle">Вход</h2>
             <form id="authForm" class="space-y-3">
-                <input type="email" id="authEmail" placeholder="Email" class="w-full px-4 py-3 border border-gray-200 rounded-xl" required>
-                <input type="password" id="authPassword" placeholder="Пароль" class="w-full px-4 py-3 border border-gray-200 rounded-xl" required>
-                <input type="text" id="authName" placeholder="Имя (только для регистрации)" class="w-full px-4 py-3 border border-gray-200 rounded-xl hidden">
+                <input type="email" id="authEmail" placeholder="Email" class="w-full px-4 py-3 border border-gray-200 rounded-xl" required autocomplete="email">
+                <input type="password" id="authPassword" placeholder="Пароль" class="w-full px-4 py-3 border border-gray-200 rounded-xl" required autocomplete="current-password">
+                <input type="text" id="authName" placeholder="Имя (только для регистрации)" class="w-full px-4 py-3 border border-gray-200 rounded-xl hidden" autocomplete="name">
                 <select id="authRole" class="w-full px-4 py-3 border border-gray-200 rounded-xl hidden">
                     <option value="executor">Исполнитель</option>
                     <option value="customer">Заказчик</option>
@@ -556,14 +576,15 @@ def index():
             </form>
             <p class="text-center text-sm mt-3 text-gray-500">
                 <span id="authSwitchText">Нет аккаунта?</span>
-                <button id="authSwitchBtn" class="text-indigo-600 font-medium">Зарегистрироваться</button>
+                <button id="authSwitchBtn" class="text-indigo-600 font-medium ml-1">Зарегистрироваться</button>
             </p>
-            <button onclick="closeAuth()" class="mt-3 w-full py-2 text-gray-400">Отмена</button>
+            <button onclick="closeAuth()" class="mt-3 w-full py-2 text-gray-400 text-sm">Отмена</button>
         </div>
     </div>
 
+    <!-- МОДАЛЬНОЕ ОКНО СОЗДАНИЯ ЗАДАНИЯ -->
     <div id="jobFormModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl p-6 w-full max-w-md">
+        <div class="bg-white rounded-2xl p-6 w-full max-w-md modal-enter">
             <h2 class="text-xl font-bold mb-4">Новая подработка</h2>
             <input id="jobTitle" placeholder="Название" class="w-full px-4 py-3 border border-gray-200 rounded-xl mb-2">
             <textarea id="jobDesc" placeholder="Описание" class="w-full px-4 py-3 border border-gray-200 rounded-xl mb-2" rows="3"></textarea>
@@ -573,10 +594,11 @@ def index():
             </select>
             <p id="coordsInfo" class="text-sm text-gray-400 mb-3">Нажмите на карту, чтобы выбрать место</p>
             <button onclick="createJob()" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium mb-2">Опубликовать</button>
-            <button onclick="closeJobForm()" class="w-full py-2 text-gray-400">Отмена</button>
+            <button onclick="closeJobForm()" class="w-full py-2 text-gray-400 text-sm">Отмена</button>
         </div>
     </div>
 
+    <!-- МОДАЛЬНОЕ ОКНО СПИСКА ЗАДАНИЙ -->
     <div id="listModal" class="hidden fixed inset-0 z-50 bg-white overflow-y-auto">
         <div class="p-4">
             <div class="flex justify-between items-center mb-4">
@@ -587,6 +609,7 @@ def index():
         </div>
     </div>
 
+    <!-- МОДАЛЬНОЕ ОКНО ПРОФИЛЯ -->
     <div id="profileModal" class="hidden fixed inset-0 z-50 bg-white overflow-y-auto">
         <div class="p-4">
             <div class="flex justify-between items-center mb-4">
@@ -607,19 +630,19 @@ def index():
                     <div class="bg-gray-50 rounded-xl p-3"><p id="reviewsCount" class="text-2xl font-bold">0</p><p class="text-xs text-gray-500">Отзывов</p></div>
                     <div class="bg-gray-50 rounded-xl p-3"><p id="userRating" class="text-2xl font-bold">0</p><p class="text-xs text-gray-500">Рейтинг</p></div>
                 </div>
-                <button onclick="showMyJobs()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-xl">Мои заказы</button>
-                <button onclick="showFavorites()" class="w-full bg-gray-50 text-gray-700 py-3 rounded-xl">Избранное</button>
+                <button onclick="showMyJobs()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-xl font-medium">Мои заказы</button>
+                <button onclick="showFavorites()" class="w-full bg-gray-50 text-gray-700 py-3 rounded-xl font-medium">Избранное</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Глобальные переменные
+        // ============ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ============
         let myMap, currentUser = null, authToken = null;
         let selectedCoords = null, tempPlacemark = null;
         const YANDEX_GEOCODER_KEY = 'a1072bf1-5f7e-4d8b-b535-a231feb84cf8';
 
-        // Инициализация карты
+        // ============ ИНИЦИАЛИЗАЦИЯ КАРТЫ ============
         ymaps.ready(() => {
             myMap = new ymaps.Map('map', {
                 center: [55.7558, 37.6173],
@@ -657,203 +680,12 @@ def index():
                 });
         }
 
-        // Переключение вкладок
+        // ============ НАВИГАЦИЯ ============
         function switchTab(tab) {
-            document.querySelectorAll('[id^="tab"]').forEach(b => b.className = b.className.replace('tab-active text-gray-900', 'text-gray-500'));
-            document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).className += ' tab-active text-gray-900';
-            
-            if (tab === 'add') {
-                if (!currentUser) return openAuth();
-                document.getElementById('jobFormModal').classList.remove('hidden');
-            } else if (tab === 'list') {
-                loadJobsList();
-                document.getElementById('listModal').classList.remove('hidden');
-            } else if (tab === 'profile') {
-                if (!currentUser) return openAuth();
-                showProfile();
-            }
-        }
-
-        function loadJobsList() {
-            fetch('/api/jobs')
-                .then(r => r.json())
-                .then(jobs => {
-                    document.getElementById('jobsList').innerHTML = jobs.map(job => `
-                        <div class="bg-white border border-gray-100 rounded-xl p-4" onclick="focusOnMap(${job.lat},${job.lng})">
-                            <div class="flex justify-between">
-                                <h3 class="font-bold">${job.title}</h3>
-                                <span class="text-indigo-600 font-bold">${job.price} руб</span>
-                            </div>
-                            <p class="text-sm text-gray-500 mt-1">${job.description}</p>
-                            <div class="flex justify-between mt-2 text-xs text-gray-400">
-                                <span>${job.category} · ${job.author.name} ⭐${job.author.rating}</span>
-                                ${job.distance ? `<span>${job.distance} км</span>` : ''}
-                            </div>
-                        </div>
-                    `).join('');
-                });
-        }
-
-        function focusOnMap(lat, lng) {
-            document.getElementById('listModal').classList.add('hidden');
-            myMap.setCenter([lat, lng], 15);
-            switchTab('map');
-        }
-
-        function closeList() {
-            document.getElementById('listModal').classList.add('hidden');
-        }
-
-        function closeProfile() {
-            document.getElementById('profileModal').classList.add('hidden');
-        }
-
-        function closeJobForm() {
-            document.getElementById('jobFormModal').classList.add('hidden');
-            if (tempPlacemark) { myMap.geoObjects.remove(tempPlacemark); tempPlacemark = null; }
-        }
-
-        // Аутентификация
-        function openAuth() {
-            document.getElementById('authModal').classList.remove('hidden');
-        }
-
-        function closeAuth() {
-            document.getElementById('authModal').classList.add('hidden');
-        }
-
-        document.getElementById('authSwitchBtn').addEventListener('click', () => {
-            const isLogin = document.getElementById('authTitle').textContent === 'Вход';
-            document.getElementById('authTitle').textContent = isLogin ? 'Регистрация' : 'Вход';
-            document.getElementById('authName').classList.toggle('hidden', isLogin);
-            document.getElementById('authRole').classList.toggle('hidden', isLogin);
-            document.getElementById('authSwitchText').textContent = isLogin ? 'Есть аккаунт?' : 'Нет аккаунта?';
-            document.getElementById('authSwitchBtn').textContent = isLogin ? 'Войти' : 'Зарегистрироваться';
-        });
-
-        document.getElementById('authForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const isLogin = document.getElementById('authTitle').textContent === 'Вход';
-            const email = document.getElementById('authEmail').value;
-            const password = document.getElementById('authPassword').value;
-            
-            const url = isLogin ? '/api/login' : '/api/register';
-            const body = { email, password };
-            if (!isLogin) {
-                body.name = document.getElementById('authName').value;
-                body.role = document.getElementById('authRole').value;
-            }
-            
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
+            document.querySelectorAll('[id^="tab"]').forEach(b => {
+                b.className = b.className.replace('tab-active', '').replace('text-gray-900', 'text-gray-500');
             });
+            const activeTab = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+            activeTab.className += ' tab-active';
             
-            const data = await res.json();
-            if (res.ok) {
-                currentUser = data.user;
-                authToken = data.token;
-                localStorage.setItem('token', authToken);
-                updateUI();
-                closeAuth();
-            } else {
-                alert(data.error || 'Ошибка');
-            }
-        });
-
-        async function logout() {
-            await fetch('/api/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${authToken}` } });
-            currentUser = null;
-            authToken = null;
-            localStorage.removeItem('token');
-            updateUI();
-        }
-
-        function updateUI() {
-            if (currentUser) {
-                document.getElementById('loginBtn').classList.add('hidden');
-                document.getElementById('userMenu').classList.remove('hidden');
-                document.getElementById('avatarImg').src = currentUser.avatar_url || 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
-            } else {
-                document.getElementById('loginBtn').classList.remove('hidden');
-                document.getElementById('userMenu').classList.add('hidden');
-            }
-        }
-
-        document.getElementById('profileBtn').addEventListener('click', () => {
-            document.getElementById('dropdownMenu').classList.toggle('hidden');
-        });
-
-        function showProfile() {
-            if (!currentUser) return openAuth();
-            document.getElementById('profileName').textContent = currentUser.name;
-            document.getElementById('profileRole').textContent = currentUser.role === 'executor' ? 'Исполнитель' : 'Заказчик';
-            document.getElementById('profileRating').textContent = currentUser.rating;
-            document.getElementById('completedJobs').textContent = currentUser.completed_jobs;
-            document.getElementById('reviewsCount').textContent = currentUser.reviews_count;
-            document.getElementById('userRating').textContent = currentUser.rating;
-            document.getElementById('profileAvatar').src = currentUser.avatar_url || 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
-            document.getElementById('profileModal').classList.remove('hidden');
-        }
-
-        function showMyJobs() {
-            // Заглушка
-            alert('Мои заказы — в разработке');
-        }
-
-        function showFavorites() {
-            // Заглушка
-            alert('Избранное — в разработке');
-        }
-
-        // Создание задания
-        async function createJob() {
-            if (!currentUser) return openAuth();
-            const title = document.getElementById('jobTitle').value;
-            const desc = document.getElementById('jobDesc').value;
-            const price = document.getElementById('jobPrice').value;
-            const cat = document.getElementById('jobCategory').value;
-            
-            if (!title || !price || !selectedCoords) {
-                alert('Заполните все поля и выберите место на карте');
-                return;
-            }
-            
-            const res = await fetch('/api/jobs', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authToken}`
-                },
-                body: JSON.stringify({
-                    title, description: desc, price: parseFloat(price),
-                    lat: selectedCoords[0], lng: selectedCoords[1], category: cat
-                })
-            });
-            
-            if (res.ok) {
-                alert('Задание опубликовано!');
-                closeJobForm();
-                loadJobsOnMap();
-            }
-        }
-
-        // Инициализация
-        const savedToken = localStorage.getItem('token');
-        if (savedToken) {
-            fetch('/api/me', { headers: { 'Authorization': `Bearer ${savedToken}` } })
-                .then(r => r.ok ? r.json() : Promise.reject())
-                .then(user => {
-                    currentUser = user;
-                    authToken = savedToken;
-                    updateUI();
-                })
-                .catch(() => localStorage.removeItem('token'));
-        }
-    </script>
-</body>
-</html>'''
-
-if __name__ == '__main__':
-    app.run(debug=True)
+            if (tab ===
