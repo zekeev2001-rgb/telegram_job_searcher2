@@ -104,11 +104,11 @@ def map_page():
         <title>Near Gig</title>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <link rel="manifest" href="/manifest.json?v=3">
+        <link rel="manifest" href="/manifest.json?v=4">
         <meta name="theme-color" content="#2196F3">
         <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1041/1041916.png">
         <meta name="mobile-web-app-capable" content="yes">
-        <style>body,html,#map{height:100%;width:100%;margin:0;padding:0;}.panel{position:absolute;top:10px;left:50px;z-index:1000;background:white;padding:8px;border-radius:5px;box-shadow:0 0 5px rgba(0,0,0,0.3);display:flex;gap:5px;flex-wrap:wrap;}.panel input,.panel select,.panel button{font-size:14px;}.search-container{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1000;background:white;border-radius:5px;box-shadow:0 0 5px rgba(0,0,0,0.3);display:flex;overflow:hidden;}.search-container input{border:none;padding:8px;width:200px;font-size:14px;outline:none;}.search-container button{border:none;background:#2196F3;color:white;padding:8px 12px;cursor:pointer;font-size:14px;}.locate-btn{position:absolute;top:10px;left:10px;z-index:1000;background:white;padding:5px 10px;border-radius:5px;box-shadow:0 0 5px rgba(0,0,0,0.3);cursor:pointer;font-size:16px;border:none;}.ymaps-2-1-79-searchbox-input__input{font-size:14px!important;}</style>
+        <style>body,html,#map{height:100%;width:100%;margin:0;padding:0;}.panel{position:absolute;top:10px;left:50px;z-index:1000;background:white;padding:8px;border-radius:5px;box-shadow:0 0 5px rgba(0,0,0,0.3);display:flex;gap:5px;flex-wrap:wrap;}.panel input,.panel select,.panel button{font-size:14px;}.search-container{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1000;background:white;border-radius:5px;box-shadow:0 0 5px rgba(0,0,0,0.3);display:flex;overflow:hidden;}.search-container input{border:none;padding:8px;width:200px;font-size:14px;outline:none;}.search-container button{border:none;background:#2196F3;color:white;padding:8px 12px;cursor:pointer;font-size:14px;}.locate-btn{position:absolute;top:10px;left:10px;z-index:1000;background:white;padding:5px 10px;border-radius:5px;box-shadow:0 0 5px rgba(0,0,0,0.3);cursor:pointer;font-size:16px;border:none;}</style>
         <script src="https://api-maps.yandex.ru/2.1/?apikey=27ec90a8-477d-41ac-a054-ba4bdd3bd265&lang=ru_RU" type="text/javascript"></script>
     </head>
     <body>
@@ -146,13 +146,12 @@ def map_page():
                 myMap = new ymaps.Map('map', {
                     center: [55.7558, 37.6173],
                     zoom: 12,
-                    controls: ['zoomControl', 'typeSelector', 'geolocationControl']
+                    controls: ['zoomControl', 'typeSelector', 'geolocationControl'],
+                    storage: false  // 🔥 Отключаем использование localStorage (решает проблему Tracking Prevention)
                 });
 
-                // Загружаем объявления
                 loadJobs();
 
-                // Клик по карте для выбора места
                 myMap.events.add('click', function(e) {
                     if (document.getElementById('formContainer').style.display === 'block') {
                         setTempMarker(e.get('coords'));
@@ -198,7 +197,6 @@ def map_page():
             });
 
             function loadJobs(filters = {}) {
-                // Удаляем старые метки
                 if (myMap) {
                     myMap.geoObjects.each(function(obj) {
                         if (obj !== myPlacemark) myMap.geoObjects.remove(obj);
@@ -241,7 +239,6 @@ def map_page():
                 return f;
             }
 
-            // Поиск адреса через Геокодер
             document.getElementById('searchBtn').addEventListener('click', function() {
                 var query = document.getElementById('searchInput').value.trim();
                 if (!query) return;
@@ -255,7 +252,6 @@ def map_page():
                 });
             });
 
-            // Сохранение
             document.getElementById('saveBtn').addEventListener('click', function() {
                 var title = document.getElementById('title').value;
                 var desc = document.getElementById('description').value;
