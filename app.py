@@ -4,16 +4,12 @@ from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
 
 from flask import Flask, request, jsonify, send_from_directory
-import telebot
-from telebot import types
 
 # ---------- НАСТРОЙКИ ----------
-TOKEN = os.environ.get('TOKEN', 'твой_токен')
-WEB_APP_URL = os.environ.get('WEB_APP_URL', 'https://telegram-job-searcher.onrender.com')
-WEBHOOK_PATH = '/webhook'
+# URL приложения (можно оставить как переменную окружения для гибкости)
+APP_URL = os.environ.get('APP_URL', 'https://near-gig.onrender.com')
 
 app = Flask(__name__)
-bot = telebot.TeleBot(TOKEN)
 
 # ---------- БАЗА ДАННЫХ ----------
 def init_db():
@@ -33,15 +29,6 @@ def init_db():
             likes INTEGER DEFAULT 0
         )
     ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS subscribers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id TEXT,
-            lat REAL,
-            lng REAL,
-            radius REAL
-        )
-    ''')
     conn.commit()
     conn.close()
 
@@ -55,26 +42,6 @@ def haversine(lat1, lng1, lat2, lng2):
     a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng/2)**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
     return R * c
-
-# ---------- TELEGRAM БОТ ----------
-@bot.message_handler(commands=['start'])
-def start(message):
-    markup = types.InlineKeyboardMarkup()
-    btn = types.InlineKeyboardButton(
-        text='Открыть карту подработок',
-        web_app=types.WebAppInfo(url=WEB_APP_URL)
-    )
-    markup.add(btn)
-    bot.send_message(message.chat.id, 'Привет! Нажми кнопку, чтобы открыть карту.', reply_markup=markup)
-
-@app.route(WEBHOOK_PATH, methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_str = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_str)
-        bot.process_new_updates([update])
-        return 'OK', 200
-    return 'Bad request', 403
 
 # ---------- СТАТИЧЕСКИЕ ФАЙЛЫ ДЛЯ PWA ----------
 @app.route('/manifest.json')
@@ -162,7 +129,7 @@ def like_job():
     conn.close()
     return jsonify({'status': 'ok'})
 
-# ---------- ГЛАВНАЯ СТРАНИЦА (PWA READY) ----------
+# ---------- ГЛАВНАЯ СТРАНИЦА ----------
 @app.route('/')
 def map_page():
     return '''
@@ -172,11 +139,8 @@ def map_page():
         <title>Карта подработок</title>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <!-- PWA Manifest -->
         <link rel="manifest" href="/manifest.json">
-        <!-- Тема оформления (цвет заголовка) -->
         <meta name="theme-color" content="#2196F3">
-        <!-- Для iOS: иконка на главный экран -->
         <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1041/1041916.png">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -230,14 +194,12 @@ def map_page():
             <button id="cancelBtn">Отмена</button>
         </div>
         <script>
-            // Регистрация Service Worker
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('/sw.js')
                     .then(reg => console.log('Service Worker зарегистрирован'))
                     .catch(err => console.log('Ошибка регистрации Service Worker:', err));
             }
 
-            // ---------- НАСТРОЙКА СЛОЁВ ----------
             var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                 attribution: '&copy; Esri'
             });
