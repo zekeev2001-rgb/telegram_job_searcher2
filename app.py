@@ -292,7 +292,6 @@ def get_job(job_id):
         conn.close()
         return jsonify({'error': 'Задание не найдено'}), 404
     
-    # Получаем отклики
     c.execute('''SELECT responses.*, users.name, users.avatar_url 
                  FROM responses JOIN users ON responses.user_id = users.id
                  WHERE responses.job_id = ?''', (job_id,))
@@ -336,31 +335,6 @@ def create_job():
     
     return jsonify({'status': 'ok'}), 201
 
-@app.route('/api/jobs/<int:job_id>/status', methods=['PUT'])
-def update_job_status(job_id):
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    user = get_user_by_token(token)
-    if not user:
-        return jsonify({'error': 'Не авторизован'}), 401
-    
-    data = request.get_json()
-    new_status = data.get('status')
-    
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT user_id FROM jobs WHERE id = ?', (job_id,))
-    job = c.fetchone()
-    
-    if not job or job['user_id'] != user['id']:
-        conn.close()
-        return jsonify({'error': 'Нет доступа'}), 403
-    
-    c.execute('UPDATE jobs SET status = ? WHERE id = ?', (new_status, job_id))
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'status': 'ok'})
-
 # ==========================================
 # ОТКЛИКИ
 # ==========================================
@@ -382,23 +356,6 @@ def respond_to_job(job_id):
     conn.close()
     
     return jsonify({'status': 'ok'}), 201
-
-@app.route('/api/responses', methods=['GET'])
-def get_my_responses():
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    user = get_user_by_token(token)
-    if not user:
-        return jsonify({'error': 'Не авторизован'}), 401
-    
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''SELECT responses.*, jobs.title as job_title, jobs.price as job_price
-                 FROM responses JOIN jobs ON responses.job_id = jobs.id
-                 WHERE responses.user_id = ? ORDER BY responses.created_at DESC''', (user['id'],))
-    responses = [dict(r) for r in c.fetchall()]
-    conn.close()
-    
-    return jsonify(responses)
 
 # ==========================================
 # ИЗБРАННОЕ
@@ -443,50 +400,6 @@ def toggle_favorite(job_id):
     conn.commit()
     conn.close()
     return jsonify({'action': action})
-
-# ==========================================
-# ОТЗЫВЫ
-# ==========================================
-@app.route('/api/reviews', methods=['POST'])
-def create_review():
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    user = get_user_by_token(token)
-    if not user:
-        return jsonify({'error': 'Не авторизован'}), 401
-    
-    data = request.get_json()
-    to_user_id = data.get('to_user_id')
-    job_id = data.get('job_id')
-    rating = data.get('rating')
-    comment = data.get('comment', '')
-    
-    if not to_user_id or not rating or rating < 1 or rating > 5:
-        return jsonify({'error': 'Некорректные данные'}), 400
-    
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('INSERT INTO reviews (from_user_id, to_user_id, job_id, rating, comment) VALUES (?, ?, ?, ?, ?)',
-              (user['id'], to_user_id, job_id, rating, comment))
-    
-    c.execute('SELECT AVG(rating), COUNT(*) FROM reviews WHERE to_user_id = ?', (to_user_id,))
-    avg_rating, count = c.fetchone()
-    c.execute('UPDATE users SET rating = ?, reviews_count = ? WHERE id = ?',
-              (round(avg_rating, 2) if avg_rating else 0, count, to_user_id))
-    
-    conn.commit()
-    conn.close()
-    return jsonify({'status': 'ok'}), 201
-
-@app.route('/api/users/<int:user_id>/reviews', methods=['GET'])
-def get_user_reviews(user_id):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''SELECT reviews.*, users.name as from_name 
-                 FROM reviews JOIN users ON reviews.from_user_id = users.id
-                 WHERE reviews.to_user_id = ? ORDER BY reviews.created_at DESC''', (user_id,))
-    reviews = [dict(r) for r in c.fetchall()]
-    conn.close()
-    return jsonify(reviews)
 
 # ==========================================
 # PWA
@@ -539,6 +452,62 @@ def index():
         .ymaps-2-1-79-type-selector { top: auto !important; bottom: 80px !important; right: 10px !important; left: auto !important; }
         .modal { animation: fadeIn 0.2s ease; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* Стили для iPhone-переключателей */
+        .settings-section {
+            background: white;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+        .settings-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .settings-item:last-child { border-bottom: none; }
+        .settings-label { font-size: 16px; color: #1a1a1a; }
+        .settings-sub { font-size: 13px; color: #8e8e93; margin-top: 2px; }
+        
+        .toggle {
+            position: relative;
+            width: 51px;
+            height: 31px;
+            flex-shrink: 0;
+        }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #e9e9ea;
+            border-radius: 31px;
+            transition: 0.3s;
+        }
+        .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 27px; width: 27px;
+            left: 2px; bottom: 2px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .toggle input:checked + .toggle-slider { background: #34c759; }
+        .toggle input:checked + .toggle-slider:before { transform: translateX(20px); }
+        
+        .back-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #6366F1;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 8px 0;
+        }
     </style>
 </head>
 <body class="bg-white overflow-hidden h-screen">
@@ -585,7 +554,7 @@ def index():
             <form id="authForm" class="space-y-3">
                 <input type="email" id="authEmail" placeholder="Email" class="w-full px-4 py-3 border rounded-xl" required>
                 <input type="password" id="authPassword" placeholder="Пароль" class="w-full px-4 py-3 border rounded-xl" required>
-                <input type="text" id="authName" placeholder="Ваше имя" class="w-full px-4 py-3 border rounded-xl hidden">
+                <input type="text" id="authName" placeholder="Ваше имя" class="w-full px-4 py-3 border rounded-xl" style="display:none;">
                 <button type="submit" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium">Войти</button>
             </form>
             <p class="text-center text-sm mt-3"><span id="authSwitchText">Нет аккаунта?</span> <button id="authSwitchBtn" class="text-indigo-600 font-medium">Зарегистрироваться</button></p>
@@ -628,6 +597,12 @@ def index():
         </div>
     </div>
 
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 bg-white overflow-y-auto">
+        <div class="p-4">
+            <div id="settingsContent"></div>
+        </div>
+    </div>
+
     <div id="jobDetailModal" class="hidden fixed inset-0 z-50 bg-white overflow-y-auto">
         <div class="p-4">
             <div class="flex justify-between items-center mb-4">
@@ -642,10 +617,31 @@ def index():
         let myMap, currentUser = null, authToken = null;
         let selectedCoords = null, tempPlacemark = null;
 
+        // Настройки
+        let settings = {
+            mapLayer: 'hybrid',
+            darkMode: false,
+            notifications: true
+        };
+
+        function loadSettings() {
+            const saved = localStorage.getItem('neargig_settings');
+            if (saved) settings = { ...settings, ...JSON.parse(saved) };
+        }
+
+        function saveSettings() {
+            localStorage.setItem('neargig_settings', JSON.stringify(settings));
+        }
+
+        loadSettings();
+
         ymaps.ready(() => {
+            const mapType = settings.mapLayer === 'hybrid' ? 'yandex#hybrid' : 'yandex#map';
             myMap = new ymaps.Map('map', {
-                center: [55.7558, 37.6173], zoom: 12,
+                center: [55.7558, 37.6173],
+                zoom: 12,
                 controls: ['zoomControl', 'typeSelector'],
+                type: mapType,
                 suppressMapOpenBlock: true
             });
             myMap.options.set('storage', false);
@@ -739,13 +735,21 @@ def index():
             alert(data.action === 'added' ? 'Добавлено в избранное' : 'Удалено из избранного');
         }
 
-        function openAuth() { document.getElementById('authModal').classList.remove('hidden'); }
+        function openAuth() {
+            document.getElementById('authModal').classList.remove('hidden');
+            document.getElementById('authTitle').textContent = 'Вход';
+            document.getElementById('authName').style.display = 'none';
+            document.getElementById('authSwitchText').textContent = 'Нет аккаунта?';
+            document.getElementById('authSwitchBtn').textContent = 'Зарегистрироваться';
+            document.querySelector('#authForm button[type="submit"]').textContent = 'Войти';
+        }
+        
         function closeAuth() { document.getElementById('authModal').classList.add('hidden'); }
 
         document.getElementById('authSwitchBtn').addEventListener('click', () => {
             const isLogin = document.getElementById('authTitle').textContent === 'Вход';
             document.getElementById('authTitle').textContent = isLogin ? 'Регистрация' : 'Вход';
-            document.getElementById('authName').classList.toggle('hidden', isLogin);
+            document.getElementById('authName').style.display = isLogin ? 'block' : 'none';
             document.getElementById('authSwitchText').textContent = isLogin ? 'Есть аккаунт?' : 'Нет аккаунта?';
             document.getElementById('authSwitchBtn').textContent = isLogin ? 'Войти' : 'Зарегистрироваться';
             document.querySelector('#authForm button[type="submit"]').textContent = isLogin ? 'Зарегистрироваться' : 'Войти';
@@ -786,19 +790,88 @@ def index():
 
         document.getElementById('profileBtn').addEventListener('click', () => document.getElementById('dropdownMenu').classList.toggle('hidden'));
 
+        function showSettings() {
+            document.getElementById('settingsContent').innerHTML = `
+                <div class="back-btn" onclick="showProfile()">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                    Профиль
+                </div>
+                <h2 class="text-2xl font-bold mt-2 mb-4">Настройки</h2>
+                
+                <div class="settings-section">
+                    <h3 class="text-sm text-gray-500 px-4 pt-3 pb-1 uppercase">Вид</h3>
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Гибридная карта</div>
+                            <div class="settings-sub">Спутник с подписями улиц</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" ${settings.mapLayer === 'hybrid' ? 'checked' : ''} 
+                                   onchange="settings.mapLayer = this.checked ? 'hybrid' : 'map'; saveSettings(); location.reload();">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Тёмная тема</div>
+                            <div class="settings-sub">Тёмный интерфейс приложения</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" ${settings.darkMode ? 'checked' : ''} 
+                                   onchange="settings.darkMode = this.checked; saveSettings();">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h3 class="text-sm text-gray-500 px-4 pt-3 pb-1 uppercase">Уведомления</h3>
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-label">Пуш-уведомления</div>
+                            <div class="settings-sub">О новых откликах и заданиях</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" ${settings.notifications ? 'checked' : ''} 
+                                   onchange="settings.notifications = this.checked; saveSettings();">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h3 class="text-sm text-gray-500 px-4 pt-3 pb-1 uppercase">О приложении</h3>
+                    <div class="settings-item">
+                        <div class="settings-label">Версия</div>
+                        <div class="text-gray-500">1.0.0</div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('settingsModal').classList.remove('hidden');
+            document.getElementById('profileModal').classList.add('hidden');
+        }
+
         async function showProfile() {
             if (!currentUser) return openAuth();
             const [myJobs, favs] = await Promise.all([
                 fetch('/api/jobs?user_id='+currentUser.id).then(r=>r.json()),
-                fetch('/api/favorites').then(r=>r.json())
+                fetch('/api/favorites', { headers: { 'Authorization': 'Bearer '+authToken } }).then(r=>r.json())
             ]);
             document.getElementById('profileContent').innerHTML = `
                 <div class="flex items-center gap-4 mb-4">
                     <img src="${currentUser.avatar_url}" class="w-20 h-20 rounded-full">
-                    <div><h3 class="font-bold text-lg">${currentUser.name}</h3><p class="text-gray-500">⭐ ${currentUser.rating} · ${currentUser.reviews_count} отзывов</p></div>
+                    <div>
+                        <h3 class="font-bold text-lg">${currentUser.name}</h3>
+                        <p class="text-gray-500">⭐ ${currentUser.rating} · ${currentUser.reviews_count} отзывов</p>
+                        <p class="text-gray-400 text-sm">${currentUser.email}</p>
+                    </div>
                 </div>
+                <button onclick="showSettings()" class="w-full bg-gray-50 text-gray-700 py-3 rounded-xl mb-4 flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                    Настройки
+                </button>
                 <h3 class="font-bold mb-2">Мои задания (${myJobs.length})</h3>
-                ${myJobs.map(j => `<div class="border rounded-lg p-3 mb-2"><b>${j.title}</b> · ${j.price} руб · ${j.status}</div>`).join('') || '<p class="text-gray-400">Нет заданий</p>'}
+                ${myJobs.map(j => `<div class="border rounded-lg p-3 mb-2"><b>${j.title}</b> · ${j.price} руб · <span class="text-xs ${j.status==='active'?'text-green-500':'text-gray-400'}">${j.status}</span></div>`).join('') || '<p class="text-gray-400">Нет заданий</p>'}
                 <h3 class="font-bold mt-4 mb-2">Избранное (${favs.length})</h3>
                 ${favs.map(j => `<div class="border rounded-lg p-3 mb-2"><b>${j.title}</b> · ${j.price} руб</div>`).join('') || '<p class="text-gray-400">Нет избранного</p>'}
             `;
