@@ -358,6 +358,37 @@ def index():
         * { -webkit-tap-highlight-color: transparent; }
         body { overscroll-behavior: none; }
         .tab-active { color: #6366F1; border-bottom: 2px solid #6366F1; }
+        
+        /* Стили для кнопки геолокации */
+        .custom-locate-btn {
+            position: absolute;
+            top: 80px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            cursor: pointer;
+            font-size: 18px;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+        }
+        
+        /* Сдвигаем контролы Яндекса */
+        .ymaps-2-1-79-zoom {
+            top: 80px !important;
+            left: 10px !important;
+        }
+        
+        .ymaps-2-1-79-type-selector {
+            top: 135px !important;
+            left: 10px !important;
+        }
     </style>
 </head>
 <body class="bg-white overflow-hidden h-screen">
@@ -377,8 +408,13 @@ def index():
         </div>
     </div>
 
+    <!-- Карта -->
     <div id="map" class="w-full h-full"></div>
 
+    <!-- Кнопка геолокации -->
+    <button id="manualLocateBtn" class="custom-locate-btn" title="Моё местоположение">📍</button>
+
+    <!-- Нижнее меню -->
     <div class="fixed bottom-0 left-0 right-0 z-50 bg-white border-t px-4 py-2 flex justify-around">
         <button onclick="switchTab('map')" id="tabMap" class="tab-active flex flex-col items-center text-xs pb-1">
             <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
@@ -398,7 +434,7 @@ def index():
         </button>
     </div>
 
-    <!-- МОДАЛЬНОЕ ОКНО АВТОРИЗАЦИИ -->
+    <!-- Модальное окно авторизации -->
     <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl p-6 w-full max-w-md">
             <h2 class="text-xl font-bold mb-4 text-center" id="authTitle">Вход</h2>
@@ -416,7 +452,7 @@ def index():
         </div>
     </div>
 
-    <!-- МОДАЛЬНОЕ ОКНО СОЗДАНИЯ ЗАДАНИЯ -->
+    <!-- Модальное окно создания задания -->
     <div id="jobFormModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl p-6 w-full max-w-md">
             <h2 class="text-xl font-bold mb-4">Новая подработка</h2>
@@ -436,12 +472,11 @@ def index():
         let myMap, currentUser = null, authToken = null;
         let selectedCoords = null, tempPlacemark = null;
 
-        // Инициализация карты
         ymaps.ready(() => {
             myMap = new ymaps.Map('map', {
                 center: [55.7558, 37.6173],
                 zoom: 12,
-                controls: ['zoomControl', 'typeSelector', 'geolocationControl']
+                controls: ['zoomControl', 'typeSelector']
             });
             loadJobsOnMap();
             myMap.events.add('click', e => {
@@ -474,7 +509,6 @@ def index():
                 });
         }
 
-        // Навигация
         function switchTab(tab) {
             document.querySelectorAll('[id^="tab"]').forEach(b => {
                 b.className = b.className.replace('tab-active', '').replace('text-gray-900', 'text-gray-500');
@@ -488,7 +522,6 @@ def index():
             }
         }
 
-        // Аутентификация
         function openAuth() { document.getElementById('authModal').classList.remove('hidden'); }
         function closeAuth() { document.getElementById('authModal').classList.add('hidden'); }
         function closeJobForm() {
@@ -496,7 +529,6 @@ def index():
             if (tempPlacemark) { myMap.geoObjects.remove(tempPlacemark); tempPlacemark = null; }
         }
 
-        // Переключение Вход/Регистрация
         document.getElementById('authSwitchBtn').addEventListener('click', () => {
             const authTitle = document.getElementById('authTitle');
             const authName = document.getElementById('authName');
@@ -521,7 +553,6 @@ def index():
             }
         });
 
-        // Отправка формы
         document.getElementById('authForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const isLogin = document.getElementById('authTitle').textContent === 'Вход';
@@ -604,7 +635,25 @@ def index():
             alert('Профиль\\nИмя: ' + currentUser.name + '\\nEmail: ' + currentUser.email + '\\nРейтинг: ' + currentUser.rating);
         }
 
-        // Создание задания
+        // Кнопка геолокации
+        document.getElementById('manualLocateBtn').addEventListener('click', () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    pos => {
+                        const coords = [pos.coords.latitude, pos.coords.longitude];
+                        myMap.setCenter(coords, 15);
+                        if (document.getElementById('jobFormModal').classList.contains('hidden') === false) {
+                            setTempMarker(coords);
+                        }
+                    },
+                    () => alert('Не удалось определить местоположение'),
+                    { enableHighAccuracy: true, timeout: 10000 }
+                );
+            } else {
+                alert('Геолокация не поддерживается');
+            }
+        });
+
         async function createJob() {
             if (!currentUser) return openAuth();
             
@@ -645,7 +694,6 @@ def index():
             }
         }
 
-        // Восстановление сессии
         const savedToken = localStorage.getItem('token');
         if (savedToken) {
             fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + savedToken } })
