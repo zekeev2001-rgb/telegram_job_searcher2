@@ -19,7 +19,6 @@ bot = telebot.TeleBot(TOKEN)
 def init_db():
     conn = sqlite3.connect('jobs.db')
     c = conn.cursor()
-    # Таблица подработок
     c.execute('''
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +33,6 @@ def init_db():
             likes INTEGER DEFAULT 0
         )
     ''')
-    # Таблица подписчиков (для уведомлений – пока не используется, но на будущее)
     c.execute('''
         CREATE TABLE IF NOT EXISTS subscribers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +49,6 @@ init_db()
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
 def haversine(lat1, lng1, lat2, lng2):
-    """Расстояние между двумя точками в километрах"""
     R = 6371.0
     dlat = radians(lat2 - lat1)
     dlng = radians(lng2 - lng1)
@@ -70,7 +67,6 @@ def start(message):
     markup.add(btn)
     bot.send_message(message.chat.id, 'Привет! Нажми кнопку, чтобы открыть карту.', reply_markup=markup)
 
-# Вебхук
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -86,12 +82,13 @@ def get_jobs():
     category = request.args.get('category')
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
-    radius = request.args.get('radius', type=float)  # км
+    radius = request.args.get('radius', type=float)
     max_price = request.args.get('max_price', type=float)
 
     conn = sqlite3.connect('jobs.db')
     c = conn.cursor()
-    query = 'SELECT id, title, description, price, lat, lng, category, created_at, expires_at, likes FROM jobs WHERE (expires_at IS NULL OR expires_at > ?)'
+    query = '''SELECT id, title, description, price, lat, lng, category, created_at, expires_at, likes 
+               FROM jobs WHERE (expires_at IS NULL OR expires_at > ?)'''
     params = [datetime.now().isoformat()]
 
     if category:
@@ -112,7 +109,6 @@ def get_jobs():
             'lat': r[4], 'lng': r[5], 'category': r[6],
             'created_at': r[7], 'expires_at': r[8], 'likes': r[9]
         }
-        # Фильтр по радиусу, если заданы координаты
         if lat is not None and lng is not None and radius is not None:
             dist = haversine(lat, lng, job['lat'], job['lng'])
             if dist <= radius:
@@ -132,7 +128,7 @@ def add_job():
     lat = data['lat']
     lng = data['lng']
     category = data.get('category', 'Другое')
-    days_valid = data.get('days_valid', 30)  # срок действия в днях
+    days_valid = data.get('days_valid', 30)
 
     created_at = datetime.now().isoformat()
     expires_at = (datetime.now() + timedelta(days=days_valid)).isoformat()
@@ -157,7 +153,7 @@ def like_job():
     conn.close()
     return jsonify({'status': 'ok'})
 
-# ---------- ГЛАВНАЯ СТРАНИЦА С КАРТОЙ ----------
+# ---------- ГЛАВНАЯ СТРАНИЦА (ИСПРАВЛЕННАЯ) ----------
 @app.route('/')
 def map_page():
     return '''
@@ -169,10 +165,8 @@ def map_page():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <!-- Плагин геолокации -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.css" />
         <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.js"></script>
-        <!-- Плагин поиска адресов -->
         <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
         <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
         <style>
@@ -187,7 +181,6 @@ def map_page():
         </style>
     </head>
     <body>
-        <!-- Панель фильтров -->
         <div class="panel">
             <select id="categoryFilter">
                 <option value="">Все категории</option>
@@ -201,12 +194,8 @@ def map_page():
             <input type="number" id="radius" placeholder="Радиус, км" style="width: 90px;">
             <button id="filterBtn">Искать</button>
         </div>
-
         <button id="addBtn" style="position:absolute; top:10px; right:10px; z-index:1000; padding:10px; background:green; color:white; border:none; border-radius:5px;">+</button>
-
         <div id="map"></div>
-
-        <!-- Форма добавления -->
         <div id="formContainer" style="display:none; position:absolute; top:50px; right:10px; background:white; padding:15px; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.3); z-index:1000;">
             <input type="text" id="title" placeholder="Название" style="width:100%; margin-bottom:5px;"><br>
             <input type="text" id="description" placeholder="Описание" style="width:100%; margin-bottom:5px;"><br>
@@ -222,13 +211,27 @@ def map_page():
             <button id="saveBtn">Сохранить</button>
             <button id="cancelBtn">Отмена</button>
         </div>
-
         <script>
-            // ---------- КАРТА ----------
-            var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
-            var hybrid = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
+            // ---------- НАСТРОЙКА СЛОЁВ ----------
+            // Спутниковая подложка (Esri)
+            var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '&copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            });
+            // Подписи (OpenStreetMap) с прозрачностью – они наложатся поверх спутника
+            var labels = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                opacity: 0.6,
+                attribution: '&copy; OpenStreetMap contributors'
+            });
+            // Гибрид = спутник + подписи
+            var hybrid = L.layerGroup([satellite, labels]);
+
+            // Обычная схема (OpenStreetMap)
+            var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            });
+
             var map = L.map('map', { layers: [hybrid] }).setView([55.7558, 37.6173], 12);
-            var baseMaps = { "Схема": streets, "Спутник": hybrid };
+            var baseMaps = { "Схема": streets, "Гибрид": hybrid };
             L.control.layers(baseMaps).addTo(map);
 
             // Геолокация
@@ -242,16 +245,14 @@ def map_page():
             }).addTo(map);
 
             var selectedLatLng = null, tempMarker = null;
-
             map.on('click', function(e) {
                 if (tempMarker) map.removeLayer(tempMarker);
                 tempMarker = L.marker(e.latlng).addTo(map).bindPopup('Выбрано здесь').openPopup();
                 selectedLatLng = e.latlng;
             });
 
-            // ---------- ФУНКЦИИ ----------
+            // ---------- ЗАГРУЗКА ДАННЫХ ----------
             function loadJobs(filters = {}) {
-                // Удаляем старые маркеры
                 map.eachLayer(function(layer) {
                     if (layer instanceof L.Marker && layer !== tempMarker) map.removeLayer(layer);
                 });
@@ -273,7 +274,6 @@ def map_page():
             }
             loadJobs();
 
-            // Лайк
             window.likeJob = function(id) {
                 fetch('/like_job', {
                     method: 'POST',
@@ -282,7 +282,6 @@ def map_page():
                 }).then(() => loadJobs(getCurrentFilters()));
             };
 
-            // Применить фильтры
             document.getElementById('filterBtn').onclick = function() {
                 var filters = {};
                 var cat = document.getElementById('categoryFilter').value;
