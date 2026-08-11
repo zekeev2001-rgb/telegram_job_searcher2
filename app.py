@@ -11,10 +11,21 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 # ==========================================
+# НАСТРОЙКА ПУТИ К БАЗЕ ДАННЫХ (СОХРАНЯЕТСЯ МЕЖДУ ДЕПЛОЯМИ)
+# ==========================================
+# На Render папка /opt/render/project/src/ не сбрасывается
+DB_PATH = os.path.join('/opt/render/project/src', 'app.db')
+
+# ==========================================
 # БАЗА ДАННЫХ
 # ==========================================
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def init_db():
-    conn = sqlite3.connect('app.db')
+    conn = get_db()
     c = conn.cursor()
     
     c.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -106,7 +117,7 @@ def generate_token():
     return secrets.token_hex(32)
 
 def get_user_by_token(token):
-    conn = sqlite3.connect('app.db')
+    conn = get_db()
     c = conn.cursor()
     c.execute('''SELECT users.* FROM users 
                  JOIN sessions ON users.id = sessions.user_id 
@@ -115,9 +126,10 @@ def get_user_by_token(token):
     conn.close()
     if user:
         return {
-            'id': user[0], 'email': user[1], 'name': user[3], 'phone': user[4],
-            'role': user[5], 'avatar_url': user[6], 'rating': user[7],
-            'reviews_count': user[8], 'completed_jobs': user[9]
+            'id': user['id'], 'email': user['email'], 'name': user['name'], 
+            'phone': user['phone'], 'role': user['role'], 
+            'avatar_url': user['avatar_url'], 'rating': user['rating'],
+            'reviews_count': user['reviews_count'], 'completed_jobs': user['completed_jobs']
         }
     return None
 
@@ -149,7 +161,7 @@ def register():
     if '@' not in email or '.' not in email:
         return jsonify({'error': 'Некорректный email'}), 400
     
-    conn = sqlite3.connect('app.db')
+    conn = get_db()
     c = conn.cursor()
     
     c.execute('SELECT id FROM users WHERE email = ?', (email,))
@@ -188,37 +200,38 @@ def login():
     if not email or not password:
         return jsonify({'error': 'Введите email и пароль'}), 400
     
-    conn = sqlite3.connect('app.db')
+    conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM users WHERE email = ?', (email,))
     user = c.fetchone()
     
-    if not user or user[2] != hash_password(password):
+    if not user or user['password_hash'] != hash_password(password):
         conn.close()
         return jsonify({'error': 'Неверный email или пароль'}), 401
     
     token = generate_token()
     expires_at = (datetime.now() + timedelta(days=30)).isoformat()
     c.execute('INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
-              (user[0], token, expires_at))
+              (user['id'], token, expires_at))
     
-    c.execute('UPDATE users SET last_login = datetime("now") WHERE id = ?', (user[0],))
+    c.execute('UPDATE users SET last_login = datetime("now") WHERE id = ?', (user['id'],))
     conn.commit()
     conn.close()
     
     return jsonify({
         'token': token,
         'user': {
-            'id': user[0], 'email': user[1], 'name': user[3], 'phone': user[4],
-            'role': user[5], 'avatar_url': user[6], 'rating': user[7],
-            'reviews_count': user[8], 'completed_jobs': user[9]
+            'id': user['id'], 'email': user['email'], 'name': user['name'], 
+            'phone': user['phone'], 'role': user['role'], 
+            'avatar_url': user['avatar_url'], 'rating': user['rating'],
+            'reviews_count': user['reviews_count'], 'completed_jobs': user['completed_jobs']
         }
     })
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    conn = sqlite3.connect('app.db')
+    conn = get_db()
     c = conn.cursor()
     c.execute('DELETE FROM sessions WHERE token = ?', (token,))
     conn.commit()
@@ -244,7 +257,7 @@ def get_jobs():
     radius = request.args.get('radius', type=float)
     max_price = request.args.get('max_price', type=float)
     
-    conn = sqlite3.connect('app.db')
+    conn = get_db()
     c = conn.cursor()
     
     query = '''SELECT jobs.*, users.name, users.rating, users.avatar_url
@@ -266,10 +279,11 @@ def get_jobs():
     jobs = []
     for r in rows:
         job = {
-            'id': r[0], 'user_id': r[1], 'title': r[2], 'description': r[3],
-            'price': r[4], 'lat': r[5], 'lng': r[6], 'category': r[7],
-            'created_at': r[9],
-            'author': {'name': r[12], 'rating': r[13], 'avatar': r[14]}
+            'id': r['id'], 'user_id': r['user_id'], 'title': r['title'], 
+            'description': r['description'], 'price': r['price'], 
+            'lat': r['lat'], 'lng': r['lng'], 'category': r['category'],
+            'created_at': r['created_at'],
+            'author': {'name': r['name'], 'rating': r['rating'], 'avatar': r['avatar_url']}
         }
         if lat and lng and radius:
             dist = haversine(lat, lng, job['lat'], job['lng'])
@@ -301,7 +315,7 @@ def create_job():
     
     expires_at = (datetime.now() + timedelta(days=30)).isoformat()
     
-    conn = sqlite3.connect('app.db')
+    conn = get_db()
     c = conn.cursor()
     c.execute('''INSERT INTO jobs (user_id, title, description, price, lat, lng, category, expires_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -316,7 +330,7 @@ def create_job():
 # ==========================================
 @app.route('/manifest.json')
 def manifest():
-    manifest_data = {
+    return jsonify({
         "name": "Near Gig",
         "short_name": "Near Gig",
         "start_url": "/",
@@ -327,8 +341,7 @@ def manifest():
             {"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "192x192", "type": "image/png"},
             {"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "512x512", "type": "image/png"}
         ]
-    }
-    return jsonify(manifest_data)
+    })
 
 @app.route('/sw.js')
 def service_worker():
@@ -359,7 +372,6 @@ def index():
         body { overscroll-behavior: none; }
         .tab-active { color: #6366F1; border-bottom: 2px solid #6366F1; }
         
-        /* Кнопка геолокации */
         .custom-locate-btn {
             position: absolute;
             top: 80px;
@@ -379,13 +391,11 @@ def index():
             height: 40px;
         }
         
-        /* Кнопки зума — слева вверху */
         .ymaps-2-1-79-zoom {
             top: 80px !important;
             left: 10px !important;
         }
         
-        /* Переключатель слоёв — ВНИЗУ СПРАВА */
         .ymaps-2-1-79-type-selector {
             top: auto !important;
             bottom: 80px !important;
@@ -413,10 +423,8 @@ def index():
 
     <div id="map" class="w-full h-full"></div>
 
-    <!-- Кнопка геолокации -->
     <button id="manualLocateBtn" class="custom-locate-btn" title="Моё местоположение">📍</button>
 
-    <!-- Нижнее меню -->
     <div class="fixed bottom-0 left-0 right-0 z-50 bg-white border-t px-4 py-2 flex justify-around">
         <button onclick="switchTab('map')" id="tabMap" class="tab-active flex flex-col items-center text-xs pb-1">
             <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
@@ -436,7 +444,6 @@ def index():
         </button>
     </div>
 
-    <!-- Модальное окно авторизации -->
     <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl p-6 w-full max-w-md">
             <h2 class="text-xl font-bold mb-4 text-center" id="authTitle">Вход</h2>
@@ -454,7 +461,6 @@ def index():
         </div>
     </div>
 
-    <!-- Модальное окно создания задания -->
     <div id="jobFormModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl p-6 w-full max-w-md">
             <h2 class="text-xl font-bold mb-4">Новая подработка</h2>
@@ -478,8 +484,12 @@ def index():
             myMap = new ymaps.Map('map', {
                 center: [55.7558, 37.6173],
                 zoom: 12,
-                controls: ['zoomControl', 'typeSelector']
+                controls: ['zoomControl', 'typeSelector'],
+                suppressMapOpenBlock: true
             });
+            
+            myMap.options.set('storage', false);
+            
             loadJobsOnMap();
             myMap.events.add('click', e => {
                 if (document.getElementById('jobFormModal').classList.contains('hidden')) return;
@@ -637,7 +647,6 @@ def index():
             alert('Профиль\\nИмя: ' + currentUser.name + '\\nEmail: ' + currentUser.email + '\\nРейтинг: ' + currentUser.rating);
         }
 
-        // Кнопка геолокации
         document.getElementById('manualLocateBtn').addEventListener('click', () => {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
