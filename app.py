@@ -30,19 +30,19 @@ def init_db():
     ''')
     try:
         c.execute('ALTER TABLE jobs ADD COLUMN category TEXT DEFAULT "Другое"')
-    except sqlite3.OperationalError:
+    except:
         pass
     try:
         c.execute('ALTER TABLE jobs ADD COLUMN created_at TEXT')
-    except sqlite3.OperationalError:
+    except:
         pass
     try:
         c.execute('ALTER TABLE jobs ADD COLUMN expires_at TEXT')
-    except sqlite3.OperationalError:
+    except:
         pass
     try:
         c.execute('ALTER TABLE jobs ADD COLUMN likes INTEGER DEFAULT 0')
-    except sqlite3.OperationalError:
+    except:
         pass
     conn.commit()
     conn.close()
@@ -65,7 +65,19 @@ def manifest():
 
 @app.route('/sw.js')
 def service_worker():
-    return send_from_directory('.', 'sw.js')
+    return '''self.addEventListener('install', function(e) {
+    self.skipWaiting();
+});
+self.addEventListener('activate', function(e) {
+    clients.claim();
+    e.waitUntil(caches.keys().then(function(keys) {
+        return Promise.all(keys.map(function(key) { return caches.delete(key); }));
+    }));
+});
+self.addEventListener('fetch', function(e) {
+    e.respondWith(fetch(e.request));
+});
+'''
 
 # ---------- API ДЛЯ КАРТЫ ----------
 @app.route('/get_jobs')
@@ -144,7 +156,7 @@ def like_job():
     conn.close()
     return jsonify({'status': 'ok'})
 
-# ---------- ГЛАВНАЯ СТРАНИЦА (v2 - Яндекс.Карты) ----------
+# ---------- ГЛАВНАЯ СТРАНИЦА ----------
 @app.route('/')
 def map_page():
     return '''
@@ -154,15 +166,10 @@ def map_page():
         <title>Near Gig – подработки рядом</title>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <!-- ОТКЛЮЧАЕМ КЭШ (чтобы точно загрузилась новая версия) -->
-        <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-        <meta http-equiv="Pragma" content="no-cache" />
-        <meta http-equiv="Expires" content="0" />
-
         <link rel="manifest" href="/manifest.json?v=2">
         <meta name="theme-color" content="#2196F3">
         <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1041/1041916.png">
-        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -250,39 +257,32 @@ def map_page():
         <button id="manualLocateBtn" class="locate-btn" title="Моё местоположение">📍</button>
 
         <script>
+            // Убиваем старый Service Worker принудительно
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                    for(let registration of registrations) { registration.unregister(); }
+                });
+            }
+
             var YANDEX_MAP_KEY = '27ec90a8-477d-41ac-a054-ba4bdd3bd265';
             var YANDEX_GEOCODER_KEY = 'a1072bf1-5f7e-4d8b-b535-a231feb84cf8';
 
             var yandexMap = L.tileLayer(
                 'https://core-renderer-tiles.maps.yandex.net/tiles?l=map&v=25.03.01-0~b:250311111111&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
-                {
-                    attribution: '&copy; <a href="https://yandex.ru/maps/">Яндекс.Карты</a>',
-                    apiKey: YANDEX_MAP_KEY
-                }
+                { attribution: '&copy; <a href="https://yandex.ru/maps/">Яндекс.Карты</a>', apiKey: YANDEX_MAP_KEY }
             );
             var yandexHybrid = L.tileLayer(
                 'https://core-renderer-tiles.maps.yandex.net/tiles?l=sat,skl&v=25.03.01-0~b:250311111111&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
-                {
-                    attribution: '&copy; <a href="https://yandex.ru/maps/">Яндекс.Карты</a>',
-                    apiKey: YANDEX_MAP_KEY
-                }
+                { attribution: '&copy; <a href="https://yandex.ru/maps/">Яндекс.Карты</a>', apiKey: YANDEX_MAP_KEY }
             );
 
-            var map = L.map('map', {
-                layers: [yandexHybrid],
-                center: [55.7558, 37.6173],
-                zoom: 12
-            });
-
+            var map = L.map('map', { layers: [yandexHybrid], center: [55.7558, 37.6173], zoom: 12 });
             var baseMaps = { "Схема": yandexMap, "Гибрид": yandexHybrid };
             L.control.layers(baseMaps).addTo(map);
 
-            var lc = L.control.locate({
-                position: 'topleft',
-                strings: { title: 'Моё местоположение' },
-                locateOptions: { enableHighAccuracy: true }
-            }).addTo(map);
+            var lc = L.control.locate({ position: 'topleft', strings: { title: 'Моё местоположение' }, locateOptions: { enableHighAccuracy: true } }).addTo(map);
 
+            // Поиск адресов
             var searchInput = document.getElementById('searchInput');
             var searchBtn = document.getElementById('searchBtn');
             var searchResults = document.getElementById('searchResults');
@@ -295,21 +295,15 @@ def map_page():
 
             function showSearchResults(items) {
                 searchResults.innerHTML = '';
-                if (!items || items.length === 0) {
-                    searchResults.style.display = 'none';
-                    return;
-                }
+                if (!items || items.length === 0) { searchResults.style.display = 'none'; return; }
                 items.forEach(function(item) {
                     var div = document.createElement('div');
                     div.textContent = item.name + ' (' + item.description + ')';
                     div.addEventListener('click', function() {
                         var pos = item.point.split(' ');
-                        var lat = parseFloat(pos[1]);
-                        var lng = parseFloat(pos[0]);
+                        var lat = parseFloat(pos[1]), lng = parseFloat(pos[0]);
                         map.setView([lat, lng], 15);
-                        if (document.getElementById('formContainer').style.display === 'block') {
-                            setTempMarker([lat, lng]);
-                        }
+                        if (document.getElementById('formContainer').style.display === 'block') setTempMarker([lat, lng]);
                         searchResults.style.display = 'none';
                         searchInput.value = '';
                     });
@@ -326,29 +320,22 @@ def map_page():
                     var members = data.response.GeoObjectCollection.featureMember;
                     members.forEach(function(member) {
                         var obj = member.GeoObject;
-                        items.push({
-                            name: obj.name,
-                            description: obj.description || '',
-                            point: obj.Point.pos
-                        });
+                        items.push({ name: obj.name, description: obj.description || '', point: obj.Point.pos });
                     });
                     showSearchResults(items);
                 });
             });
 
             document.addEventListener('click', function(e) {
-                if (!e.target.closest('.search-container') && !e.target.closest('#searchResults')) {
-                    searchResults.style.display = 'none';
-                }
+                if (!e.target.closest('.search-container') && !e.target.closest('#searchResults')) searchResults.style.display = 'none';
             });
 
-            var selectedLatLng = null;
-            var tempMarker = null;
+            // Форма
+            var selectedLatLng = null, tempMarker = null;
 
             function setTempMarker(latlng) {
                 if (tempMarker) map.removeLayer(tempMarker);
-                tempMarker = L.marker(latlng).addTo(map)
-                    .bindPopup('Здесь будет ваша подработка').openPopup();
+                tempMarker = L.marker(latlng).addTo(map).bindPopup('Здесь будет ваша подработка').openPopup();
                 selectedLatLng = latlng;
             }
 
@@ -356,169 +343,81 @@ def map_page():
                 document.getElementById('formContainer').style.display = 'block';
                 if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(
-                        function(position) {
-                            var lat = position.coords.latitude;
-                            var lng = position.coords.longitude;
-                            setTempMarker([lat, lng]);
-                            map.setView([lat, lng], 15);
-                        },
-                        function(error) {
-                            alert('Не удалось определить ваше местоположение. Выберите точку на карте или воспользуйтесь поиском.');
-                        },
+                        function(pos) { var lat=pos.coords.latitude, lng=pos.coords.longitude; setTempMarker([lat,lng]); map.setView([lat,lng],15); },
+                        function() { alert('Не удалось определить местоположение.'); },
                         { enableHighAccuracy: true, timeout: 10000 }
                     );
-                } else {
-                    alert('Геолокация не поддерживается. Выберите точку на карте.');
-                }
+                } else alert('Геолокация не поддерживается.');
             });
 
             map.on('click', function(e) {
-                if (document.getElementById('formContainer').style.display === 'block') {
-                    setTempMarker(e.latlng);
-                }
+                if (document.getElementById('formContainer').style.display === 'block') setTempMarker(e.latlng);
             });
 
             document.getElementById('cancelBtn').addEventListener('click', function() {
                 document.getElementById('formContainer').style.display = 'none';
-                if (tempMarker) {
-                    map.removeLayer(tempMarker);
-                    tempMarker = null;
-                    selectedLatLng = null;
-                }
+                if (tempMarker) { map.removeLayer(tempMarker); tempMarker = null; selectedLatLng = null; }
             });
 
             document.getElementById('manualLocateBtn').addEventListener('click', function() {
                 if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(
-                        function(position) {
-                            var lat = position.coords.latitude;
-                            var lng = position.coords.longitude;
-                            map.setView([lat, lng], 15);
-                            if (document.getElementById('formContainer').style.display === 'block') {
-                                setTempMarker([lat, lng]);
-                            }
-                        },
-                        function(error) {
-                            alert('Не удалось определить местоположение.');
-                        }
+                        function(pos) { var lat=pos.coords.latitude, lng=pos.coords.longitude; map.setView([lat,lng],15); },
+                        function() { alert('Не удалось определить местоположение.'); }
                     );
-                } else {
-                    alert('Геолокация не поддерживается.');
                 }
             });
 
+            // Загрузка данных
             function loadJobs(filters = {}) {
-                map.eachLayer(function(layer) {
-                    if (layer instanceof L.Marker && layer !== tempMarker) {
-                        map.removeLayer(layer);
-                    }
-                });
+                map.eachLayer(function(layer) { if (layer instanceof L.Marker && layer !== tempMarker) map.removeLayer(layer); });
                 var params = new URLSearchParams(filters).toString();
-                fetch('/get_jobs?' + params)
-                    .then(r => r.json())
-                    .then(jobs => {
-                        jobs.forEach(job => {
-                            var popup = '<b>' + job.title + '</b><br>' +
-                                        job.description + '<br>' +
-                                        'Цена: ' + job.price + ' руб.<br>' +
-                                        'Категория: ' + job.category + '<br>' +
-                                        '❤️ ' + job.likes +
-                                        ' <button onclick="likeJob(' + job.id + ')">Нравится</button>';
-                            if (job.distance) popup += '<br>Расстояние: ' + job.distance + ' км';
-                            L.marker([job.lat, job.lng]).addTo(map).bindPopup(popup);
-                        });
+                fetch('/get_jobs?' + params).then(r => r.json()).then(jobs => {
+                    jobs.forEach(job => {
+                        var popup = '<b>'+job.title+'</b><br>'+job.description+'<br>Цена: '+job.price+' руб.<br>Категория: '+job.category+'<br>❤️ '+job.likes+' <button onclick="likeJob('+job.id+')">Нравится</button>';
+                        if (job.distance) popup += '<br>Расстояние: '+job.distance+' км';
+                        L.marker([job.lat, job.lng]).addTo(map).bindPopup(popup);
                     });
+                });
             }
             loadJobs();
 
             window.likeJob = function(id) {
-                fetch('/like_job', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: id })
-                }).then(() => loadJobs(getCurrentFilters()));
+                fetch('/like_job', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) }).then(() => loadJobs(getCurrentFilters()));
             };
 
             document.getElementById('filterBtn').onclick = function() {
                 var filters = {};
-                var cat = document.getElementById('categoryFilter').value;
-                var mp = document.getElementById('maxPrice').value;
-                var rad = document.getElementById('radius').value;
+                var cat = document.getElementById('categoryFilter').value, mp = document.getElementById('maxPrice').value, rad = document.getElementById('radius').value;
                 if (cat) filters.category = cat;
                 if (mp) filters.max_price = mp;
-                if (rad) {
-                    var center = map.getCenter();
-                    filters.lat = center.lat;
-                    filters.lng = center.lng;
-                    filters.radius = rad;
-                }
+                if (rad) { var c = map.getCenter(); filters.lat = c.lat; filters.lng = c.lng; filters.radius = rad; }
                 loadJobs(filters);
             };
 
             function getCurrentFilters() {
                 var f = {};
-                var cat = document.getElementById('categoryFilter').value;
-                var mp = document.getElementById('maxPrice').value;
-                var rad = document.getElementById('radius').value;
+                var cat = document.getElementById('categoryFilter').value, mp = document.getElementById('maxPrice').value, rad = document.getElementById('radius').value;
                 if (cat) f.category = cat;
                 if (mp) f.max_price = mp;
-                if (rad) {
-                    var c = map.getCenter();
-                    f.lat = c.lat; f.lng = c.lng; f.radius = rad;
-                }
+                if (rad) { var c = map.getCenter(); f.lat = c.lat; f.lng = c.lng; f.radius = rad; }
                 return f;
             }
 
+            // Сохранение
             document.getElementById('saveBtn').addEventListener('click', function() {
-                var title = document.getElementById('title').value;
-                var desc = document.getElementById('description').value;
-                var price = document.getElementById('price').value;
-                var cat = document.getElementById('category').value;
-                var days = document.getElementById('daysValid').value;
-
-                if (!title || !price) {
-                    alert('Введите название и оплату');
-                    return;
-                }
-                if (!selectedLatLng) {
-                    alert('Сначала выберите место на карте (или разрешите геолокацию)');
-                    return;
-                }
-
-                fetch('/add_job', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        title: title,
-                        description: desc,
-                        price: parseFloat(price),
-                        lat: selectedLatLng.lat,
-                        lng: selectedLatLng.lng,
-                        category: cat,
-                        days_valid: parseInt(days)
-                    })
-                })
-                .then(r => r.json())
+                var title = document.getElementById('title').value, desc = document.getElementById('description').value, price = document.getElementById('price').value;
+                var cat = document.getElementById('category').value, days = document.getElementById('daysValid').value;
+                if (!title||!price||!selectedLatLng) { alert('Заполните все поля и выберите место'); return; }
+                fetch('/add_job', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title,description:desc,price:parseFloat(price),lat:selectedLatLng.lat,lng:selectedLatLng.lng,category:cat,days_valid:parseInt(days)}) })
+                .then(r=>r.json())
                 .then(() => {
                     alert('Объявление добавлено!');
                     document.getElementById('formContainer').style.display = 'none';
-                    if (tempMarker) {
-                        map.removeLayer(tempMarker);
-                        tempMarker = null;
-                        selectedLatLng = null;
-                    }
+                    if (tempMarker) { map.removeLayer(tempMarker); tempMarker=null; selectedLatLng=null; }
                     loadJobs(getCurrentFilters());
                 });
             });
-
-            // ОТКЛЮЧАЕМ Service Worker, чтобы он не кэшировал старую версию
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                    for(let registration of registrations) {
-                        registration.unregister();
-                    }
-                });
-            }
         </script>
     </body>
     </html>
