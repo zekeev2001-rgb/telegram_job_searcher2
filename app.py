@@ -10,10 +10,6 @@ APP_URL = os.environ.get('APP_URL', 'https://near-gig.onrender.com')
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
-# ==========================================
-# НАСТРОЙКА ПУТИ К БАЗЕ ДАННЫХ (СОХРАНЯЕТСЯ МЕЖДУ ДЕПЛОЯМИ)
-# ==========================================
-# На Render папка /opt/render/project/src/ не сбрасывается
 DB_PATH = os.path.join('/opt/render/project/src', 'app.db')
 
 # ==========================================
@@ -33,7 +29,7 @@ def init_db():
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         name TEXT,
-        phone TEXT,
+        phone TEXT DEFAULT '',
         role TEXT DEFAULT 'executor',
         avatar_url TEXT DEFAULT 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
         rating REAL DEFAULT 0,
@@ -56,7 +52,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         title TEXT NOT NULL,
-        description TEXT,
+        description TEXT DEFAULT '',
         price REAL,
         lat REAL,
         lng REAL,
@@ -72,7 +68,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         job_id INTEGER NOT NULL,
         user_id INTEGER NOT NULL,
-        message TEXT,
+        message TEXT DEFAULT '',
         status TEXT DEFAULT 'pending',
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY(job_id) REFERENCES jobs(id),
@@ -85,7 +81,7 @@ def init_db():
         to_user_id INTEGER NOT NULL,
         job_id INTEGER,
         rating INTEGER CHECK(rating >= 1 AND rating <= 5),
-        comment TEXT,
+        comment TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY(from_user_id) REFERENCES users(id),
         FOREIGN KEY(to_user_id) REFERENCES users(id),
@@ -125,12 +121,7 @@ def get_user_by_token(token):
     user = c.fetchone()
     conn.close()
     if user:
-        return {
-            'id': user['id'], 'email': user['email'], 'name': user['name'], 
-            'phone': user['phone'], 'role': user['role'], 
-            'avatar_url': user['avatar_url'], 'rating': user['rating'],
-            'reviews_count': user['reviews_count'], 'completed_jobs': user['completed_jobs']
-        }
+        return dict(user)
     return None
 
 def haversine(lat1, lng1, lat2, lng2):
@@ -154,16 +145,13 @@ def register():
     
     if not email or not password or not name:
         return jsonify({'error': 'Заполните все поля'}), 400
-    
     if len(password) < 6:
         return jsonify({'error': 'Пароль должен быть минимум 6 символов'}), 400
-    
     if '@' not in email or '.' not in email:
         return jsonify({'error': 'Некорректный email'}), 400
     
     conn = get_db()
     c = conn.cursor()
-    
     c.execute('SELECT id FROM users WHERE email = ?', (email,))
     if c.fetchone():
         conn.close()
@@ -178,17 +166,14 @@ def register():
     expires_at = (datetime.now() + timedelta(days=30)).isoformat()
     c.execute('INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
               (user_id, token, expires_at))
-    
     conn.commit()
     conn.close()
     
     return jsonify({
         'token': token,
-        'user': {
-            'id': user_id, 'email': email, 'name': name,
-            'role': role, 'avatar_url': 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
-            'rating': 0, 'reviews_count': 0, 'completed_jobs': 0
-        }
+        'user': {'id': user_id, 'email': email, 'name': name, 'role': role, 
+                 'avatar_url': 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+                 'rating': 0, 'reviews_count': 0, 'completed_jobs': 0}
     }), 201
 
 @app.route('/api/login', methods=['POST'])
@@ -213,20 +198,11 @@ def login():
     expires_at = (datetime.now() + timedelta(days=30)).isoformat()
     c.execute('INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
               (user['id'], token, expires_at))
-    
     c.execute('UPDATE users SET last_login = datetime("now") WHERE id = ?', (user['id'],))
     conn.commit()
     conn.close()
     
-    return jsonify({
-        'token': token,
-        'user': {
-            'id': user['id'], 'email': user['email'], 'name': user['name'], 
-            'phone': user['phone'], 'role': user['role'], 
-            'avatar_url': user['avatar_url'], 'rating': user['rating'],
-            'reviews_count': user['reviews_count'], 'completed_jobs': user['completed_jobs']
-        }
-    })
+    return jsonify({'token': token, 'user': dict(user)})
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
@@ -247,7 +223,7 @@ def get_me():
     return jsonify(user)
 
 # ==========================================
-# РАБОТА С ПОДРАБОТКАМИ
+# ПОДРАБОТКИ
 # ==========================================
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
@@ -256,21 +232,32 @@ def get_jobs():
     lng = request.args.get('lng', type=float)
     radius = request.args.get('radius', type=float)
     max_price = request.args.get('max_price', type=float)
+    user_id = request.args.get('user_id', type=int)
+    status = request.args.get('status', 'active')
     
     conn = get_db()
     c = conn.cursor()
     
-    query = '''SELECT jobs.*, users.name, users.rating, users.avatar_url
+    query = '''SELECT jobs.*, users.name as author_name, users.rating as author_rating, 
+               users.avatar_url as author_avatar, users.id as author_id
                FROM jobs JOIN users ON jobs.user_id = users.id
-               WHERE jobs.status = 'active' '''
+               WHERE 1=1 '''
     params = []
     
+    if status:
+        query += ' AND jobs.status = ?'
+        params.append(status)
     if category:
         query += ' AND jobs.category = ?'
         params.append(category)
     if max_price is not None:
         query += ' AND jobs.price <= ?'
         params.append(max_price)
+    if user_id:
+        query += ' AND jobs.user_id = ?'
+        params.append(user_id)
+    
+    query += ' ORDER BY jobs.created_at DESC'
     
     c.execute(query, params)
     rows = c.fetchall()
@@ -278,13 +265,9 @@ def get_jobs():
     
     jobs = []
     for r in rows:
-        job = {
-            'id': r['id'], 'user_id': r['user_id'], 'title': r['title'], 
-            'description': r['description'], 'price': r['price'], 
-            'lat': r['lat'], 'lng': r['lng'], 'category': r['category'],
-            'created_at': r['created_at'],
-            'author': {'name': r['name'], 'rating': r['rating'], 'avatar': r['avatar_url']}
-        }
+        job = dict(r)
+        job['author'] = {'id': r['author_id'], 'name': r['author_name'], 
+                         'rating': r['author_rating'], 'avatar': r['author_avatar']}
         if lat and lng and radius:
             dist = haversine(lat, lng, job['lat'], job['lng'])
             if dist <= radius:
@@ -294,6 +277,34 @@ def get_jobs():
             jobs.append(job)
     
     return jsonify(jobs)
+
+@app.route('/api/jobs/<int:job_id>', methods=['GET'])
+def get_job(job_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT jobs.*, users.name as author_name, users.rating as author_rating, 
+                 users.avatar_url as author_avatar
+                 FROM jobs JOIN users ON jobs.user_id = users.id
+                 WHERE jobs.id = ?''', (job_id,))
+    job = c.fetchone()
+    
+    if not job:
+        conn.close()
+        return jsonify({'error': 'Задание не найдено'}), 404
+    
+    # Получаем отклики
+    c.execute('''SELECT responses.*, users.name, users.avatar_url 
+                 FROM responses JOIN users ON responses.user_id = users.id
+                 WHERE responses.job_id = ?''', (job_id,))
+    responses = [dict(r) for r in c.fetchall()]
+    
+    conn.close()
+    
+    result = dict(job)
+    result['author'] = {'name': job['author_name'], 'rating': job['author_rating'], 'avatar': job['author_avatar']}
+    result['responses'] = responses
+    
+    return jsonify(result)
 
 @app.route('/api/jobs', methods=['POST'])
 def create_job():
@@ -325,8 +336,160 @@ def create_job():
     
     return jsonify({'status': 'ok'}), 201
 
+@app.route('/api/jobs/<int:job_id>/status', methods=['PUT'])
+def update_job_status(job_id):
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    user = get_user_by_token(token)
+    if not user:
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    data = request.get_json()
+    new_status = data.get('status')
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT user_id FROM jobs WHERE id = ?', (job_id,))
+    job = c.fetchone()
+    
+    if not job or job['user_id'] != user['id']:
+        conn.close()
+        return jsonify({'error': 'Нет доступа'}), 403
+    
+    c.execute('UPDATE jobs SET status = ? WHERE id = ?', (new_status, job_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'status': 'ok'})
+
 # ==========================================
-# PWA ФАЙЛЫ
+# ОТКЛИКИ
+# ==========================================
+@app.route('/api/jobs/<int:job_id>/respond', methods=['POST'])
+def respond_to_job(job_id):
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    user = get_user_by_token(token)
+    if not user:
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    data = request.get_json()
+    message = data.get('message', '')
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO responses (job_id, user_id, message) VALUES (?, ?, ?)',
+              (job_id, user['id'], message))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'status': 'ok'}), 201
+
+@app.route('/api/responses', methods=['GET'])
+def get_my_responses():
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    user = get_user_by_token(token)
+    if not user:
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT responses.*, jobs.title as job_title, jobs.price as job_price
+                 FROM responses JOIN jobs ON responses.job_id = jobs.id
+                 WHERE responses.user_id = ? ORDER BY responses.created_at DESC''', (user['id'],))
+    responses = [dict(r) for r in c.fetchall()]
+    conn.close()
+    
+    return jsonify(responses)
+
+# ==========================================
+# ИЗБРАННОЕ
+# ==========================================
+@app.route('/api/favorites', methods=['GET'])
+def get_favorites():
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    user = get_user_by_token(token)
+    if not user:
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT jobs.*, users.name as author_name
+                 FROM favorites JOIN jobs ON favorites.job_id = jobs.id
+                 JOIN users ON jobs.user_id = users.id
+                 WHERE favorites.user_id = ?''', (user['id'],))
+    favorites = [dict(r) for r in c.fetchall()]
+    conn.close()
+    
+    return jsonify(favorites)
+
+@app.route('/api/favorites/<int:job_id>', methods=['POST'])
+def toggle_favorite(job_id):
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    user = get_user_by_token(token)
+    if not user:
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id FROM favorites WHERE user_id = ? AND job_id = ?', (user['id'], job_id))
+    existing = c.fetchone()
+    
+    if existing:
+        c.execute('DELETE FROM favorites WHERE id = ?', (existing['id'],))
+        action = 'removed'
+    else:
+        c.execute('INSERT INTO favorites (user_id, job_id) VALUES (?, ?)', (user['id'], job_id))
+        action = 'added'
+    
+    conn.commit()
+    conn.close()
+    return jsonify({'action': action})
+
+# ==========================================
+# ОТЗЫВЫ
+# ==========================================
+@app.route('/api/reviews', methods=['POST'])
+def create_review():
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    user = get_user_by_token(token)
+    if not user:
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    data = request.get_json()
+    to_user_id = data.get('to_user_id')
+    job_id = data.get('job_id')
+    rating = data.get('rating')
+    comment = data.get('comment', '')
+    
+    if not to_user_id or not rating or rating < 1 or rating > 5:
+        return jsonify({'error': 'Некорректные данные'}), 400
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO reviews (from_user_id, to_user_id, job_id, rating, comment) VALUES (?, ?, ?, ?, ?)',
+              (user['id'], to_user_id, job_id, rating, comment))
+    
+    c.execute('SELECT AVG(rating), COUNT(*) FROM reviews WHERE to_user_id = ?', (to_user_id,))
+    avg_rating, count = c.fetchone()
+    c.execute('UPDATE users SET rating = ?, reviews_count = ? WHERE id = ?',
+              (round(avg_rating, 2) if avg_rating else 0, count, to_user_id))
+    
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'}), 201
+
+@app.route('/api/users/<int:user_id>/reviews', methods=['GET'])
+def get_user_reviews(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT reviews.*, users.name as from_name 
+                 FROM reviews JOIN users ON reviews.from_user_id = users.id
+                 WHERE reviews.to_user_id = ? ORDER BY reviews.created_at DESC''', (user_id,))
+    reviews = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return jsonify(reviews)
+
+# ==========================================
+# PWA
 # ==========================================
 @app.route('/manifest.json')
 def manifest():
@@ -335,19 +498,14 @@ def manifest():
         "short_name": "Near Gig",
         "start_url": "/",
         "display": "standalone",
-        "background_color": "#ffffff",
         "theme_color": "#6366F1",
-        "icons": [
-            {"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "192x192", "type": "image/png"},
-            {"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "512x512", "type": "image/png"}
-        ]
+        "icons": [{"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "512x512"}]
     })
 
 @app.route('/sw.js')
 def service_worker():
-    return '''self.addEventListener('install', function(e) { self.skipWaiting(); });
-self.addEventListener('activate', function(e) { clients.claim(); });
-self.addEventListener('fetch', function(e) { e.respondWith(fetch(e.request)); });'''
+    return '''self.addEventListener('install',function(e){self.skipWaiting()});
+self.addEventListener('fetch',function(e){e.respondWith(fetch(e.request))})'''
 
 # ==========================================
 # ГЛАВНАЯ СТРАНИЦА
@@ -371,37 +529,16 @@ def index():
         * { -webkit-tap-highlight-color: transparent; }
         body { overscroll-behavior: none; }
         .tab-active { color: #6366F1; border-bottom: 2px solid #6366F1; }
-        
         .custom-locate-btn {
-            position: absolute;
-            top: 80px;
-            right: 10px;
-            z-index: 1000;
-            background: white;
-            padding: 0;
-            border-radius: 8px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-            cursor: pointer;
-            font-size: 18px;
-            border: none;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 40px;
-            height: 40px;
+            position: absolute; top: 80px; right: 10px; z-index: 1000;
+            background: white; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            cursor: pointer; font-size: 18px; border: none;
+            width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
         }
-        
-        .ymaps-2-1-79-zoom {
-            top: 80px !important;
-            left: 10px !important;
-        }
-        
-        .ymaps-2-1-79-type-selector {
-            top: auto !important;
-            bottom: 80px !important;
-            right: 10px !important;
-            left: auto !important;
-        }
+        .ymaps-2-1-79-zoom { top: 80px !important; left: 10px !important; }
+        .ymaps-2-1-79-type-selector { top: auto !important; bottom: 80px !important; right: 10px !important; left: auto !important; }
+        .modal { animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 <body class="bg-white overflow-hidden h-screen">
@@ -414,7 +551,9 @@ def index():
                     <img id="avatarImg" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="w-full h-full object-cover">
                 </button>
                 <div id="dropdownMenu" class="hidden absolute right-0 top-10 bg-white shadow-lg rounded-lg py-2 w-48 border">
-                    <button onclick="showProfile()" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Профиль</button>
+                    <button onclick="showMyJobs()" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Мои задания</button>
+                    <button onclick="showFavorites()" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Избранное</button>
+                    <hr class="my-1">
                     <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-50">Выйти</button>
                 </div>
             </div>
@@ -422,57 +561,80 @@ def index():
     </div>
 
     <div id="map" class="w-full h-full"></div>
-
     <button id="manualLocateBtn" class="custom-locate-btn" title="Моё местоположение">📍</button>
 
     <div class="fixed bottom-0 left-0 right-0 z-50 bg-white border-t px-4 py-2 flex justify-around">
         <button onclick="switchTab('map')" id="tabMap" class="tab-active flex flex-col items-center text-xs pb-1">
-            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-            Карта
+            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>Карта
         </button>
         <button onclick="switchTab('add')" id="tabAdd" class="flex flex-col items-center text-xs text-gray-500 pb-1">
-            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
-            Создать
+            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>Создать
         </button>
         <button onclick="switchTab('list')" id="tabList" class="flex flex-col items-center text-xs text-gray-500 pb-1">
-            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M4 14h4v-4H4v4zm6 0h4v-4h-4v4zm6 0h4v-4h-4v4zM4 20h4v-4H4v4zm6 0h4v-4h-4v4zm6 0h4v-4h-4v4z"/></svg>
-            Задания
+            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M4 14h4v-4H4v4zm6 0h4v-4h-4v4zm6 0h4v-4h-4v4z"/></svg>Задания
         </button>
         <button onclick="switchTab('profile')" id="tabProfile" class="flex flex-col items-center text-xs text-gray-500 pb-1">
-            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-            Профиль
+            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Профиль
         </button>
     </div>
 
-    <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+    <!-- Модальные окна -->
+    <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 modal">
         <div class="bg-white rounded-2xl p-6 w-full max-w-md">
             <h2 class="text-xl font-bold mb-4 text-center" id="authTitle">Вход</h2>
             <form id="authForm" class="space-y-3">
-                <input type="email" id="authEmail" placeholder="Email" class="w-full px-4 py-3 border border-gray-200 rounded-xl" required autocomplete="email">
-                <input type="password" id="authPassword" placeholder="Пароль" class="w-full px-4 py-3 border border-gray-200 rounded-xl" required>
-                <input type="text" id="authName" placeholder="Ваше имя" class="w-full px-4 py-3 border border-gray-200 rounded-xl hidden" autocomplete="name">
+                <input type="email" id="authEmail" placeholder="Email" class="w-full px-4 py-3 border rounded-xl" required>
+                <input type="password" id="authPassword" placeholder="Пароль" class="w-full px-4 py-3 border rounded-xl" required>
+                <input type="text" id="authName" placeholder="Ваше имя" class="w-full px-4 py-3 border rounded-xl hidden">
                 <button type="submit" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium">Войти</button>
             </form>
-            <p class="text-center text-sm mt-3 text-gray-500">
-                <span id="authSwitchText">Нет аккаунта?</span>
-                <button id="authSwitchBtn" class="text-indigo-600 font-medium ml-1">Зарегистрироваться</button>
-            </p>
-            <button onclick="closeAuth()" class="mt-3 w-full py-2 text-gray-400 text-sm">Отмена</button>
+            <p class="text-center text-sm mt-3"><span id="authSwitchText">Нет аккаунта?</span> <button id="authSwitchBtn" class="text-indigo-600 font-medium">Зарегистрироваться</button></p>
+            <button onclick="closeAuth()" class="mt-3 w-full py-2 text-gray-400">Отмена</button>
         </div>
     </div>
 
-    <div id="jobFormModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+    <div id="jobFormModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 modal">
         <div class="bg-white rounded-2xl p-6 w-full max-w-md">
             <h2 class="text-xl font-bold mb-4">Новая подработка</h2>
-            <input id="jobTitle" placeholder="Название" class="w-full px-4 py-3 border border-gray-200 rounded-xl mb-2">
-            <textarea id="jobDesc" placeholder="Описание" class="w-full px-4 py-3 border border-gray-200 rounded-xl mb-2" rows="3"></textarea>
-            <input id="jobPrice" type="number" placeholder="Цена, руб" class="w-full px-4 py-3 border border-gray-200 rounded-xl mb-2">
-            <select id="jobCategory" class="w-full px-4 py-3 border border-gray-200 rounded-xl mb-2">
+            <input id="jobTitle" placeholder="Название" class="w-full px-4 py-3 border rounded-xl mb-2">
+            <textarea id="jobDesc" placeholder="Описание" class="w-full px-4 py-3 border rounded-xl mb-2" rows="3"></textarea>
+            <input id="jobPrice" type="number" placeholder="Цена, руб" class="w-full px-4 py-3 border rounded-xl mb-2">
+            <select id="jobCategory" class="w-full px-4 py-3 border rounded-xl mb-2">
                 <option>Курьер</option><option>Уборка</option><option>Ремонт</option><option>IT</option><option>Другое</option>
             </select>
             <p id="coordsInfo" class="text-sm text-gray-400 mb-3">Нажмите на карту, чтобы выбрать место</p>
             <button onclick="createJob()" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium mb-2">Опубликовать</button>
-            <button onclick="closeJobForm()" class="w-full py-2 text-gray-400 text-sm">Отмена</button>
+            <button onclick="closeJobForm()" class="w-full py-2 text-gray-400">Отмена</button>
+        </div>
+    </div>
+
+    <div id="listModal" class="hidden fixed inset-0 z-50 bg-white overflow-y-auto">
+        <div class="p-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Все задания</h2>
+                <button onclick="closeList()" class="text-gray-500 text-2xl">&times;</button>
+            </div>
+            <div id="jobsList" class="space-y-3"></div>
+        </div>
+    </div>
+
+    <div id="profileModal" class="hidden fixed inset-0 z-50 bg-white overflow-y-auto">
+        <div class="p-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Профиль</h2>
+                <button onclick="closeProfile()" class="text-gray-500 text-2xl">&times;</button>
+            </div>
+            <div id="profileContent"></div>
+        </div>
+    </div>
+
+    <div id="jobDetailModal" class="hidden fixed inset-0 z-50 bg-white overflow-y-auto">
+        <div class="p-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold" id="detailTitle"></h2>
+                <button onclick="closeJobDetail()" class="text-gray-500 text-2xl">&times;</button>
+            </div>
+            <div id="detailContent"></div>
         </div>
     </div>
 
@@ -482,14 +644,11 @@ def index():
 
         ymaps.ready(() => {
             myMap = new ymaps.Map('map', {
-                center: [55.7558, 37.6173],
-                zoom: 12,
+                center: [55.7558, 37.6173], zoom: 12,
                 controls: ['zoomControl', 'typeSelector'],
                 suppressMapOpenBlock: true
             });
-            
             myMap.options.set('storage', false);
-            
             loadJobsOnMap();
             myMap.events.add('click', e => {
                 if (document.getElementById('jobFormModal').classList.contains('hidden')) return;
@@ -501,7 +660,6 @@ def index():
             if (tempPlacemark) myMap.geoObjects.remove(tempPlacemark);
             tempPlacemark = new ymaps.Placemark(coords, { balloonContent: 'Здесь будет задание' });
             myMap.geoObjects.add(tempPlacemark);
-            tempPlacemark.balloon.open();
             selectedCoords = coords;
             document.getElementById('coordsInfo').textContent = 'Место выбрано';
         }
@@ -513,56 +671,84 @@ def index():
                 .then(r => r.json())
                 .then(jobs => {
                     jobs.forEach(job => {
-                        const pm = new ymaps.Placemark([job.lat, job.lng], {
-                            balloonContent: '<b>' + job.title + '</b><br>' + job.description + '<br>💰 ' + job.price + ' руб.<br>👤 ' + job.author.name + ' ⭐' + job.author.rating
-                        });
-                        myMap.geoObjects.add(pm);
+                        myMap.geoObjects.add(new ymaps.Placemark([job.lat, job.lng], {
+                            balloonContent: `<b>${job.title}</b><br>${job.description}<br>💰 ${job.price} руб.<br>👤 ${job.author.name} ⭐${job.author.rating}<br><button onclick="showJobDetail(${job.id})">Подробнее</button>`
+                        }));
                     });
                 });
         }
 
         function switchTab(tab) {
-            document.querySelectorAll('[id^="tab"]').forEach(b => {
-                b.className = b.className.replace('tab-active', '').replace('text-gray-900', 'text-gray-500');
+            document.querySelectorAll('[id^="tab"]').forEach(b => b.className = b.className.replace('tab-active','').replace('text-gray-900','text-gray-500'));
+            document.getElementById('tab'+tab.charAt(0).toUpperCase()+tab.slice(1)).className += ' tab-active';
+            if (tab === 'add') { if (!currentUser) return openAuth(); document.getElementById('jobFormModal').classList.remove('hidden'); }
+            if (tab === 'list') { loadJobsList(); document.getElementById('listModal').classList.remove('hidden'); }
+            if (tab === 'profile') { if (!currentUser) return openAuth(); showProfile(); }
+        }
+
+        function loadJobsList() {
+            fetch('/api/jobs').then(r=>r.json()).then(jobs => {
+                document.getElementById('jobsList').innerHTML = jobs.map(job => `
+                    <div class="bg-white border rounded-xl p-4 cursor-pointer hover:shadow-md" onclick="showJobDetail(${job.id})">
+                        <div class="flex justify-between"><h3 class="font-bold">${job.title}</h3><span class="text-indigo-600 font-bold">${job.price} руб</span></div>
+                        <p class="text-sm text-gray-500 mt-1">${job.description}</p>
+                        <div class="flex justify-between mt-2 text-xs text-gray-400"><span>${job.category} · ${job.author.name}</span>${job.distance?`<span>${job.distance} км</span>`:''}</div>
+                    </div>`).join('');
+                document.getElementById('listModal').classList.remove('hidden');
             });
-            const activeTab = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
-            if (activeTab) activeTab.className += ' tab-active';
-            
-            if (tab === 'add') {
-                if (!currentUser) return openAuth();
-                document.getElementById('jobFormModal').classList.remove('hidden');
-            }
+        }
+
+        async function showJobDetail(jobId) {
+            const res = await fetch('/api/jobs/' + jobId);
+            const job = await res.json();
+            document.getElementById('detailTitle').textContent = job.title;
+            document.getElementById('detailContent').innerHTML = `
+                <p class="text-gray-600 mb-2">${job.description}</p>
+                <p class="text-2xl font-bold text-indigo-600 mb-2">${job.price} руб</p>
+                <p class="text-sm text-gray-500 mb-2">Категория: ${job.category}</p>
+                <p class="text-sm text-gray-500 mb-4">Автор: ${job.author.name} ⭐${job.author.rating}</p>
+                ${currentUser && currentUser.id !== job.user_id ? `
+                    <button onclick="respondToJob(${job.id})" class="w-full bg-green-500 text-white py-2 rounded-xl mb-2">Откликнуться</button>
+                    <button onclick="toggleFav(${job.id})" class="w-full bg-gray-100 py-2 rounded-xl">В избранное</button>
+                ` : ''}
+                <h3 class="font-bold mt-4 mb-2">Отклики (${job.responses.length})</h3>
+                ${job.responses.map(r => `<div class="flex items-center gap-2 py-2"><img src="${r.avatar_url}" class="w-8 h-8 rounded-full"><span>${r.name}: ${r.message || 'Без сообщения'}</span></div>`).join('')}
+            `;
+            document.getElementById('jobDetailModal').classList.remove('hidden');
+        }
+
+        function closeJobDetail() { document.getElementById('jobDetailModal').classList.add('hidden'); }
+        function closeList() { document.getElementById('listModal').classList.add('hidden'); }
+        function closeProfile() { document.getElementById('profileModal').classList.add('hidden'); }
+        function closeJobForm() { document.getElementById('jobFormModal').classList.add('hidden'); if (tempPlacemark) { myMap.geoObjects.remove(tempPlacemark); tempPlacemark = null; } }
+
+        async function respondToJob(jobId) {
+            const msg = prompt('Ваше сообщение (необязательно):');
+            await fetch(`/api/jobs/${jobId}/respond`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+authToken },
+                body: JSON.stringify({ message: msg || '' })
+            });
+            alert('Отклик отправлен!');
+        }
+
+        async function toggleFav(jobId) {
+            const res = await fetch(`/api/favorites/${jobId}`, {
+                method: 'POST', headers: { 'Authorization': 'Bearer '+authToken }
+            });
+            const data = await res.json();
+            alert(data.action === 'added' ? 'Добавлено в избранное' : 'Удалено из избранного');
         }
 
         function openAuth() { document.getElementById('authModal').classList.remove('hidden'); }
         function closeAuth() { document.getElementById('authModal').classList.add('hidden'); }
-        function closeJobForm() {
-            document.getElementById('jobFormModal').classList.add('hidden');
-            if (tempPlacemark) { myMap.geoObjects.remove(tempPlacemark); tempPlacemark = null; }
-        }
 
         document.getElementById('authSwitchBtn').addEventListener('click', () => {
-            const authTitle = document.getElementById('authTitle');
-            const authName = document.getElementById('authName');
-            const authSwitchText = document.getElementById('authSwitchText');
-            const authSwitchBtn = document.getElementById('authSwitchBtn');
-            const submitBtn = document.querySelector('#authForm button[type="submit"]');
-            
-            const isLogin = authTitle.textContent === 'Вход';
-            
-            if (isLogin) {
-                authTitle.textContent = 'Регистрация';
-                authName.classList.remove('hidden');
-                authSwitchText.textContent = 'Есть аккаунт?';
-                authSwitchBtn.textContent = 'Войти';
-                submitBtn.textContent = 'Зарегистрироваться';
-            } else {
-                authTitle.textContent = 'Вход';
-                authName.classList.add('hidden');
-                authSwitchText.textContent = 'Нет аккаунта?';
-                authSwitchBtn.textContent = 'Зарегистрироваться';
-                submitBtn.textContent = 'Войти';
-            }
+            const isLogin = document.getElementById('authTitle').textContent === 'Вход';
+            document.getElementById('authTitle').textContent = isLogin ? 'Регистрация' : 'Вход';
+            document.getElementById('authName').classList.toggle('hidden', isLogin);
+            document.getElementById('authSwitchText').textContent = isLogin ? 'Есть аккаунт?' : 'Нет аккаунта?';
+            document.getElementById('authSwitchBtn').textContent = isLogin ? 'Войти' : 'Зарегистрироваться';
+            document.querySelector('#authForm button[type="submit"]').textContent = isLogin ? 'Зарегистрироваться' : 'Войти';
         });
 
         document.getElementById('authForm').addEventListener('submit', async (e) => {
@@ -570,150 +756,107 @@ def index():
             const isLogin = document.getElementById('authTitle').textContent === 'Вход';
             const email = document.getElementById('authEmail').value.trim();
             const password = document.getElementById('authPassword').value.trim();
-            
-            if (!email || !password) {
-                alert('Заполните email и пароль');
-                return;
-            }
-            
-            const url = isLogin ? '/api/login' : '/api/register';
+            if (!email || !password) return alert('Заполните email и пароль');
             const body = { email, password };
-            
             if (!isLogin) {
                 const name = document.getElementById('authName').value.trim();
-                if (!name) {
-                    alert('Введите ваше имя');
-                    return;
-                }
+                if (!name) return alert('Введите имя');
                 body.name = name;
             }
-            
-            try {
-                const res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                });
-                
-                const data = await res.json();
-                
-                if (res.ok) {
-                    currentUser = data.user;
-                    authToken = data.token;
-                    localStorage.setItem('token', authToken);
-                    updateUI();
-                    closeAuth();
-                    document.getElementById('authEmail').value = '';
-                    document.getElementById('authPassword').value = '';
-                    document.getElementById('authName').value = '';
-                } else {
-                    alert(data.error || 'Ошибка');
-                }
-            } catch (err) {
-                alert('Ошибка соединения с сервером');
-            }
+            const res = await fetch(isLogin ? '/api/login' : '/api/register', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (res.ok) {
+                currentUser = data.user; authToken = data.token;
+                localStorage.setItem('token', authToken); updateUI(); closeAuth();
+            } else alert(data.error);
         });
 
         async function logout() {
-            try {
-                await fetch('/api/logout', {
-                    method: 'POST',
-                    headers: { 'Authorization': 'Bearer ' + authToken }
-                });
-            } catch (err) {}
-            currentUser = null;
-            authToken = null;
-            localStorage.removeItem('token');
-            updateUI();
+            await fetch('/api/logout', { method: 'POST', headers: { 'Authorization': 'Bearer '+authToken } });
+            currentUser = null; authToken = null; localStorage.removeItem('token'); updateUI();
         }
 
         function updateUI() {
-            if (currentUser) {
-                document.getElementById('loginBtn').classList.add('hidden');
-                document.getElementById('userMenu').classList.remove('hidden');
-                document.getElementById('avatarImg').src = currentUser.avatar_url || 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
-            } else {
-                document.getElementById('loginBtn').classList.remove('hidden');
-                document.getElementById('userMenu').classList.add('hidden');
-            }
+            document.getElementById('loginBtn').classList.toggle('hidden', !!currentUser);
+            document.getElementById('userMenu').classList.toggle('hidden', !currentUser);
+            if (currentUser) document.getElementById('avatarImg').src = currentUser.avatar_url;
         }
 
-        document.getElementById('profileBtn').addEventListener('click', () => {
-            document.getElementById('dropdownMenu').classList.toggle('hidden');
-        });
+        document.getElementById('profileBtn').addEventListener('click', () => document.getElementById('dropdownMenu').classList.toggle('hidden'));
 
-        function showProfile() {
+        async function showProfile() {
             if (!currentUser) return openAuth();
-            alert('Профиль\\nИмя: ' + currentUser.name + '\\nEmail: ' + currentUser.email + '\\nРейтинг: ' + currentUser.rating);
+            const [myJobs, favs] = await Promise.all([
+                fetch('/api/jobs?user_id='+currentUser.id).then(r=>r.json()),
+                fetch('/api/favorites').then(r=>r.json())
+            ]);
+            document.getElementById('profileContent').innerHTML = `
+                <div class="flex items-center gap-4 mb-4">
+                    <img src="${currentUser.avatar_url}" class="w-20 h-20 rounded-full">
+                    <div><h3 class="font-bold text-lg">${currentUser.name}</h3><p class="text-gray-500">⭐ ${currentUser.rating} · ${currentUser.reviews_count} отзывов</p></div>
+                </div>
+                <h3 class="font-bold mb-2">Мои задания (${myJobs.length})</h3>
+                ${myJobs.map(j => `<div class="border rounded-lg p-3 mb-2"><b>${j.title}</b> · ${j.price} руб · ${j.status}</div>`).join('') || '<p class="text-gray-400">Нет заданий</p>'}
+                <h3 class="font-bold mt-4 mb-2">Избранное (${favs.length})</h3>
+                ${favs.map(j => `<div class="border rounded-lg p-3 mb-2"><b>${j.title}</b> · ${j.price} руб</div>`).join('') || '<p class="text-gray-400">Нет избранного</p>'}
+            `;
+            document.getElementById('profileModal').classList.remove('hidden');
+        }
+
+        async function showMyJobs() {
+            if (!currentUser) return openAuth();
+            const jobs = await fetch('/api/jobs?user_id='+currentUser.id).then(r=>r.json());
+            document.getElementById('detailTitle').textContent = 'Мои задания';
+            document.getElementById('detailContent').innerHTML = jobs.map(j => `
+                <div class="border rounded-lg p-3 mb-2"><b>${j.title}</b> · ${j.price} руб · ${j.status}</div>
+            `).join('') || '<p class="text-gray-400">Нет заданий</p>';
+            document.getElementById('jobDetailModal').classList.remove('hidden');
+        }
+
+        async function showFavorites() {
+            if (!currentUser) return openAuth();
+            const favs = await fetch('/api/favorites', { headers: { 'Authorization': 'Bearer '+authToken } }).then(r=>r.json());
+            document.getElementById('detailTitle').textContent = 'Избранное';
+            document.getElementById('detailContent').innerHTML = favs.map(j => `
+                <div class="border rounded-lg p-3 mb-2"><b>${j.title}</b> · ${j.price} руб</div>
+            `).join('') || '<p class="text-gray-400">Нет избранного</p>';
+            document.getElementById('jobDetailModal').classList.remove('hidden');
         }
 
         document.getElementById('manualLocateBtn').addEventListener('click', () => {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
-                    pos => {
-                        const coords = [pos.coords.latitude, pos.coords.longitude];
-                        myMap.setCenter(coords, 15);
-                        if (document.getElementById('jobFormModal').classList.contains('hidden') === false) {
-                            setTempMarker(coords);
-                        }
-                    },
+                    pos => { myMap.setCenter([pos.coords.latitude, pos.coords.longitude], 15); },
                     () => alert('Не удалось определить местоположение'),
                     { enableHighAccuracy: true, timeout: 10000 }
                 );
-            } else {
-                alert('Геолокация не поддерживается');
             }
         });
 
         async function createJob() {
             if (!currentUser) return openAuth();
-            
             const title = document.getElementById('jobTitle').value.trim();
-            const desc = document.getElementById('jobDesc').value.trim();
             const price = document.getElementById('jobPrice').value;
-            const cat = document.getElementById('jobCategory').value;
-            
-            if (!title || !price || !selectedCoords) {
-                alert('Заполните все поля и выберите место на карте');
-                return;
-            }
-            
-            try {
-                const res = await fetch('/api/jobs', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + authToken
-                    },
-                    body: JSON.stringify({
-                        title: title,
-                        description: desc,
-                        price: parseFloat(price),
-                        lat: selectedCoords[0],
-                        lng: selectedCoords[1],
-                        category: cat
-                    })
-                });
-                
-                if (res.ok) {
-                    alert('Задание опубликовано!');
-                    closeJobForm();
-                    loadJobsOnMap();
-                }
-            } catch (err) {
-                alert('Ошибка при создании задания');
-            }
+            if (!title || !price || !selectedCoords) return alert('Заполните все поля');
+            await fetch('/api/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+authToken },
+                body: JSON.stringify({
+                    title, description: document.getElementById('jobDesc').value.trim(),
+                    price: parseFloat(price), lat: selectedCoords[0], lng: selectedCoords[1],
+                    category: document.getElementById('jobCategory').value
+                })
+            });
+            alert('Опубликовано!'); closeJobForm(); loadJobsOnMap();
         }
 
         const savedToken = localStorage.getItem('token');
         if (savedToken) {
-            fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + savedToken } })
+            fetch('/api/me', { headers: { 'Authorization': 'Bearer '+savedToken } })
                 .then(r => r.ok ? r.json() : Promise.reject())
-                .then(user => {
-                    currentUser = user;
-                    authToken = savedToken;
-                    updateUI();
-                })
+                .then(user => { currentUser = user; authToken = savedToken; updateUI(); })
                 .catch(() => localStorage.removeItem('token'));
         }
     </script>
