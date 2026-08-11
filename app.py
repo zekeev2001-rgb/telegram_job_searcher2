@@ -233,28 +233,6 @@ def get_me():
         return jsonify({'error': 'Не авторизован'}), 401
     return jsonify(user)
 
-@app.route('/api/profile', methods=['PUT'])
-def update_profile():
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    user = get_user_by_token(token)
-    if not user:
-        return jsonify({'error': 'Не авторизован'}), 401
-    
-    data = request.get_json()
-    conn = sqlite3.connect('app.db')
-    c = conn.cursor()
-    
-    if 'name' in data:
-        c.execute('UPDATE users SET name = ? WHERE id = ?', (data['name'], user['id']))
-    if 'phone' in data:
-        c.execute('UPDATE users SET phone = ? WHERE id = ?', (data['phone'], user['id']))
-    if 'avatar_url' in data:
-        c.execute('UPDATE users SET avatar_url = ? WHERE id = ?', (data['avatar_url'], user['id']))
-    
-    conn.commit()
-    conn.close()
-    return jsonify({'status': 'ok'})
-
 # ==========================================
 # РАБОТА С ПОДРАБОТКАМИ
 # ==========================================
@@ -265,15 +243,14 @@ def get_jobs():
     lng = request.args.get('lng', type=float)
     radius = request.args.get('radius', type=float)
     max_price = request.args.get('max_price', type=float)
-    status = request.args.get('status', 'active')
     
     conn = sqlite3.connect('app.db')
     c = conn.cursor()
     
-    query = '''SELECT jobs.*, users.name as author_name, users.rating as author_rating, users.avatar_url as author_avatar
+    query = '''SELECT jobs.*, users.name, users.rating, users.avatar_url
                FROM jobs JOIN users ON jobs.user_id = users.id
-               WHERE jobs.status = ?'''
-    params = [status]
+               WHERE jobs.status = 'active' '''
+    params = []
     
     if category:
         query += ' AND jobs.category = ?'
@@ -291,7 +268,7 @@ def get_jobs():
         job = {
             'id': r[0], 'user_id': r[1], 'title': r[2], 'description': r[3],
             'price': r[4], 'lat': r[5], 'lng': r[6], 'category': r[7],
-            'status': r[8], 'created_at': r[9], 'expires_at': r[10], 'views': r[11],
+            'created_at': r[9],
             'author': {'name': r[12], 'rating': r[13], 'avatar': r[14]}
         }
         if lat and lng and radius:
@@ -318,23 +295,21 @@ def create_job():
     lat = data.get('lat')
     lng = data.get('lng')
     category = data.get('category', 'Другое')
-    days_valid = data.get('days_valid', 30)
     
     if not title or not price or not lat or not lng:
         return jsonify({'error': 'Заполните обязательные поля'}), 400
     
-    expires_at = (datetime.now() + timedelta(days=days_valid)).isoformat()
+    expires_at = (datetime.now() + timedelta(days=30)).isoformat()
     
     conn = sqlite3.connect('app.db')
     c = conn.cursor()
     c.execute('''INSERT INTO jobs (user_id, title, description, price, lat, lng, category, expires_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
               (user['id'], title, description, price, lat, lng, category, expires_at))
-    job_id = c.lastrowid
     conn.commit()
     conn.close()
     
-    return jsonify({'id': job_id, 'status': 'ok'}), 201
+    return jsonify({'status': 'ok'}), 201
 
 # ==========================================
 # PWA ФАЙЛЫ
@@ -349,31 +324,17 @@ def manifest():
         "background_color": "#ffffff",
         "theme_color": "#6366F1",
         "icons": [
-            {
-                "src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png",
-                "sizes": "192x192",
-                "type": "image/png"
-            },
-            {
-                "src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png",
-                "sizes": "512x512",
-                "type": "image/png"
-            }
+            {"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png", "sizes": "512x512", "type": "image/png"}
         ]
     }
     return jsonify(manifest_data)
 
 @app.route('/sw.js')
 def service_worker():
-    return '''self.addEventListener('install', function(e) {
-    self.skipWaiting();
-});
-self.addEventListener('activate', function(e) {
-    clients.claim();
-});
-self.addEventListener('fetch', function(e) {
-    e.respondWith(fetch(e.request));
-});'''
+    return '''self.addEventListener('install', function(e) { self.skipWaiting(); });
+self.addEventListener('activate', function(e) { clients.claim(); });
+self.addEventListener('fetch', function(e) { e.respondWith(fetch(e.request)); });'''
 
 # ==========================================
 # ГЛАВНАЯ СТРАНИЦА
@@ -444,7 +405,7 @@ def index():
             <form id="authForm" class="space-y-3">
                 <input type="email" id="authEmail" placeholder="Email" class="w-full px-4 py-3 border border-gray-200 rounded-xl" required autocomplete="email">
                 <input type="password" id="authPassword" placeholder="Пароль" class="w-full px-4 py-3 border border-gray-200 rounded-xl" required>
-                <input type="text" id="authName" placeholder="Ваше имя" class="w-full px-4 py-3 border border-gray-200 rounded-xl hidden">
+                <input type="text" id="authName" placeholder="Ваше имя" class="w-full px-4 py-3 border border-gray-200 rounded-xl hidden" autocomplete="name">
                 <button type="submit" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium">Войти</button>
             </form>
             <p class="text-center text-sm mt-3 text-gray-500">
@@ -472,10 +433,8 @@ def index():
     </div>
 
     <script>
-        // Глобальные переменные
         let myMap, currentUser = null, authToken = null;
         let selectedCoords = null, tempPlacemark = null;
-        const YANDEX_GEOCODER_KEY = 'a1072bf1-5f7e-4d8b-b535-a231feb84cf8';
 
         // Инициализация карты
         ymaps.ready(() => {
@@ -497,7 +456,7 @@ def index():
             myMap.geoObjects.add(tempPlacemark);
             tempPlacemark.balloon.open();
             selectedCoords = coords;
-            document.getElementById('coordsInfo').textContent = 'Место выбрано: ' + coords[0].toFixed(4) + ', ' + coords[1].toFixed(4);
+            document.getElementById('coordsInfo').textContent = 'Место выбрано';
         }
 
         function loadJobsOnMap(filters = {}) {
@@ -515,7 +474,7 @@ def index():
                 });
         }
 
-        // Переключение вкладок
+        // Навигация
         function switchTab(tab) {
             document.querySelectorAll('[id^="tab"]').forEach(b => {
                 b.className = b.className.replace('tab-active', '').replace('text-gray-900', 'text-gray-500');
@@ -537,14 +496,32 @@ def index():
             if (tempPlacemark) { myMap.geoObjects.remove(tempPlacemark); tempPlacemark = null; }
         }
 
+        // Переключение Вход/Регистрация
         document.getElementById('authSwitchBtn').addEventListener('click', () => {
-            const isLogin = document.getElementById('authTitle').textContent === 'Вход';
-            document.getElementById('authTitle').textContent = isLogin ? 'Регистрация' : 'Вход';
-            document.getElementById('authName').classList.toggle('hidden', isLogin);
-            document.getElementById('authSwitchText').textContent = isLogin ? 'Есть аккаунт?' : 'Нет аккаунта?';
-            document.getElementById('authSwitchBtn').textContent = isLogin ? 'Войти' : 'Зарегистрироваться';
+            const authTitle = document.getElementById('authTitle');
+            const authName = document.getElementById('authName');
+            const authSwitchText = document.getElementById('authSwitchText');
+            const authSwitchBtn = document.getElementById('authSwitchBtn');
+            const submitBtn = document.querySelector('#authForm button[type="submit"]');
+            
+            const isLogin = authTitle.textContent === 'Вход';
+            
+            if (isLogin) {
+                authTitle.textContent = 'Регистрация';
+                authName.classList.remove('hidden');
+                authSwitchText.textContent = 'Есть аккаунт?';
+                authSwitchBtn.textContent = 'Войти';
+                submitBtn.textContent = 'Зарегистрироваться';
+            } else {
+                authTitle.textContent = 'Вход';
+                authName.classList.add('hidden');
+                authSwitchText.textContent = 'Нет аккаунта?';
+                authSwitchBtn.textContent = 'Зарегистрироваться';
+                submitBtn.textContent = 'Войти';
+            }
         });
 
+        // Отправка формы
         document.getElementById('authForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const isLogin = document.getElementById('authTitle').textContent === 'Вход';
@@ -591,7 +568,6 @@ def index():
                 }
             } catch (err) {
                 alert('Ошибка соединения с сервером');
-                console.error(err);
             }
         });
 
@@ -625,7 +601,7 @@ def index():
 
         function showProfile() {
             if (!currentUser) return openAuth();
-            alert('Профиль\\nИмя: ' + currentUser.name + '\\nEmail: ' + currentUser.email + '\\nРейтинг: ' + currentUser.rating + '\\nВыполнено заказов: ' + currentUser.completed_jobs);
+            alert('Профиль\\nИмя: ' + currentUser.name + '\\nEmail: ' + currentUser.email + '\\nРейтинг: ' + currentUser.rating);
         }
 
         // Создание задания
