@@ -359,7 +359,7 @@ def index():
         body { overscroll-behavior: none; }
         .tab-active { color: #6366F1; border-bottom: 2px solid #6366F1; }
         
-        /* Стили для кнопки геолокации */
+        /* Кнопка геолокации */
         .custom-locate-btn {
             position: absolute;
             top: 80px;
@@ -379,15 +379,18 @@ def index():
             height: 40px;
         }
         
-        /* Сдвигаем контролы Яндекса */
+        /* Кнопки зума — слева вверху */
         .ymaps-2-1-79-zoom {
             top: 80px !important;
             left: 10px !important;
         }
         
+        /* Переключатель слоёв — ВНИЗУ СПРАВА */
         .ymaps-2-1-79-type-selector {
-            top: 135px !important;
-            left: 10px !important;
+            top: auto !important;
+            bottom: 80px !important;
+            right: 10px !important;
+            left: auto !important;
         }
     </style>
 </head>
@@ -408,7 +411,6 @@ def index():
         </div>
     </div>
 
-    <!-- Карта -->
     <div id="map" class="w-full h-full"></div>
 
     <!-- Кнопка геолокации -->
