@@ -1,7 +1,6 @@
 /* =========================================================
    NEAR GIG — APP.JS
-   Новая версия интерфейса
-   Карта + задания + поиск + профиль + избранное
+   Версия совместима с текущим templates/index.html
    ========================================================= */
 
 let map = null;
@@ -24,15 +23,7 @@ let authMode = 'login';
 let token = localStorage.getItem('near_token') || '';
 let dark = localStorage.getItem('near_dark') === '1';
 
-let currentJobFilter = 'all';
-let currentSearchQuery = '';
-
 const $ = id => document.getElementById(id);
-
-
-/* =========================================================
-   БЕЗОПАСНЫЙ HTML
-   ========================================================= */
 
 const esc = value =>
   String(value ?? '').replace(
@@ -46,356 +37,8 @@ const esc = value =>
     }[char])
   );
 
-
 const money = value =>
-  new Intl.NumberFormat('ru-RU').format(
-    Number(value || 0)
-  ) + ' ₽';
-
-
-/* =========================================================
-   ДОПОЛНИТЕЛЬНЫЕ СТИЛИ ИНТЕРФЕЙСА
-   Добавляем из JS, чтобы не ломать style.css
-   ========================================================= */
-
-function injectAppStyles() {
-
-  if ($('near-gig-app-styles')) return;
-
-  const style = document.createElement('style');
-
-  style.id = 'near-gig-app-styles';
-
-  style.textContent = `
-    .jobs-modern {
-      max-width: 760px;
-      margin: 0 auto;
-      padding: 4px 0 120px;
-    }
-
-    .jobs-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 18px;
-    }
-
-    .jobs-header h2 {
-      margin: 0;
-      font-size: 27px;
-      line-height: 1.1;
-      letter-spacing: -0.7px;
-    }
-
-    .jobs-header p {
-      margin: 7px 0 0;
-      opacity: .58;
-      font-size: 14px;
-    }
-
-    .jobs-count {
-      min-width: 42px;
-      height: 42px;
-      padding: 0 12px;
-      border-radius: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(83,103,201,.10);
-      color: #5367c9;
-      font-weight: 800;
-      font-size: 14px;
-    }
-
-    .jobs-search {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      background: var(--card-bg, #fff);
-      border: 1px solid rgba(80,90,130,.10);
-      border-radius: 16px;
-      padding: 7px 8px 7px 14px;
-      margin-bottom: 14px;
-      box-shadow: 0 8px 30px rgba(30,40,80,.06);
-    }
-
-    .jobs-search span {
-      opacity: .45;
-      font-size: 19px;
-    }
-
-    .jobs-search input {
-      flex: 1;
-      min-width: 0;
-      border: 0;
-      outline: 0;
-      background: transparent;
-      font: inherit;
-      color: inherit;
-      padding: 9px 0;
-    }
-
-    .jobs-search button {
-      border: 0;
-      background: #5367c9;
-      color: #fff;
-      border-radius: 11px;
-      padding: 10px 15px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    .job-filters {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding: 2px 0 12px;
-      scrollbar-width: none;
-    }
-
-    .job-filters::-webkit-scrollbar {
-      display: none;
-    }
-
-    .job-filter {
-      flex: 0 0 auto;
-      border: 1px solid rgba(80,90,130,.12);
-      background: var(--card-bg, #fff);
-      color: inherit;
-      border-radius: 999px;
-      padding: 9px 14px;
-      font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    .job-filter.active {
-      background: #5367c9;
-      border-color: #5367c9;
-      color: #fff;
-    }
-
-    .jobs-list {
-      display: grid;
-      gap: 12px;
-    }
-
-    .modern-job-card {
-      position: relative;
-      background: var(--card-bg, #fff);
-      border: 1px solid rgba(80,90,130,.09);
-      border-radius: 20px;
-      padding: 17px;
-      cursor: pointer;
-      transition:
-        transform .18s ease,
-        box-shadow .18s ease,
-        border-color .18s ease;
-      box-shadow: 0 8px 28px rgba(30,40,80,.055);
-    }
-
-    .modern-job-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 13px 35px rgba(30,40,80,.10);
-      border-color: rgba(83,103,201,.22);
-    }
-
-    .modern-job-card:active {
-      transform: scale(.99);
-    }
-
-    .modern-job-top {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-    }
-
-    .modern-job-icon {
-      width: 44px;
-      height: 44px;
-      flex: 0 0 44px;
-      border-radius: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(83,103,201,.10);
-      color: #5367c9;
-      font-size: 20px;
-    }
-
-    .modern-job-main {
-      flex: 1;
-      min-width: 0;
-      padding-right: 38px;
-    }
-
-    .modern-job-title {
-      font-weight: 800;
-      font-size: 16px;
-      line-height: 1.25;
-      margin-bottom: 5px;
-    }
-
-    .modern-job-category {
-      font-size: 12px;
-      font-weight: 700;
-      opacity: .55;
-    }
-
-    .modern-job-price {
-      position: absolute;
-      top: 17px;
-      right: 17px;
-      font-weight: 900;
-      font-size: 16px;
-      color: #5367c9;
-      white-space: nowrap;
-    }
-
-    .modern-job-description {
-      margin: 13px 0;
-      font-size: 13px;
-      line-height: 1.45;
-      opacity: .68;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-
-    .modern-job-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 7px;
-    }
-
-    .modern-job-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      border-radius: 9px;
-      padding: 6px 9px;
-      background: rgba(80,90,130,.07);
-      font-size: 11px;
-      font-weight: 650;
-      opacity: .82;
-    }
-
-    .modern-job-fav {
-      position: absolute;
-      right: 14px;
-      bottom: 14px;
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      border: 0;
-      background: rgba(80,90,130,.07);
-      cursor: pointer;
-      font-size: 17px;
-      color: inherit;
-    }
-
-    .modern-job-fav.active {
-      color: #5367c9;
-      background: rgba(83,103,201,.12);
-    }
-
-    .jobs-empty {
-      text-align: center;
-      padding: 42px 20px;
-      background: var(--card-bg, #fff);
-      border-radius: 20px;
-      border: 1px dashed rgba(80,90,130,.18);
-    }
-
-    .jobs-empty-icon {
-      font-size: 38px;
-      margin-bottom: 12px;
-      opacity: .55;
-    }
-
-    .jobs-empty b {
-      display: block;
-      margin-bottom: 6px;
-    }
-
-    .jobs-empty span {
-      font-size: 13px;
-      opacity: .55;
-    }
-
-    .modern-detail {
-      display: grid;
-      gap: 15px;
-    }
-
-    .detail-price-box {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 15px;
-      padding: 15px;
-      border-radius: 17px;
-      background: rgba(83,103,201,.08);
-    }
-
-    .detail-price-box span {
-      font-size: 12px;
-      opacity: .55;
-    }
-
-    .detail-price-box b {
-      font-size: 22px;
-      color: #5367c9;
-    }
-
-    .detail-section {
-      padding: 14px;
-      border-radius: 15px;
-      background: rgba(80,90,130,.055);
-    }
-
-    .detail-section-title {
-      font-size: 12px;
-      font-weight: 800;
-      opacity: .5;
-      text-transform: uppercase;
-      letter-spacing: .5px;
-      margin-bottom: 7px;
-    }
-
-    .detail-description {
-      font-size: 14px;
-      line-height: 1.55;
-      white-space: pre-wrap;
-    }
-
-    .detail-actions {
-      display: grid;
-      gap: 9px;
-      margin-top: 3px;
-    }
-
-    @media (max-width: 700px) {
-
-      .jobs-modern {
-        padding-bottom: 105px;
-      }
-
-      .jobs-header h2 {
-        font-size: 24px;
-      }
-
-      .modern-job-card {
-        border-radius: 17px;
-      }
-
-    }
-  `;
-
-  document.head.appendChild(style);
-}
+  new Intl.NumberFormat('ru-RU').format(Number(value || 0)) + ' ₽';
 
 
 /* =========================================================
@@ -404,9 +47,7 @@ function injectAppStyles() {
 
 document.body.classList.toggle('dark', dark);
 
-
 function toggleTheme(button) {
-
   dark = !dark;
 
   localStorage.setItem(
@@ -461,12 +102,10 @@ async function api(url, options = {}) {
   } catch (_) {}
 
   if (!response.ok) {
-
     throw new Error(
       data.error ||
       'Не удалось выполнить запрос'
     );
-
   }
 
   return data;
@@ -512,7 +151,6 @@ function closeM(id) {
   }
 }
 
-
 function setNav(id) {
 
   document
@@ -530,7 +168,7 @@ function setNav(id) {
 
 
 /* =========================================================
-   ДАННЫЕ
+   ДАННЫЕ ЗАДАНИЙ
    ========================================================= */
 
 function normalizeJobs(data) {
@@ -568,8 +206,6 @@ function addressOf(job) {
 
 function init() {
 
-  injectAppStyles();
-
   if (typeof ymaps === 'undefined') {
 
     toast(
@@ -588,7 +224,6 @@ function init() {
     loadJobs();
 
   });
-
 
   if (
     'serviceWorker' in navigator
@@ -616,6 +251,10 @@ function createMainMap() {
       'Near Gig: элемент #map отсутствует'
     );
 
+    toast(
+      'Ошибка карты: элемент карты не найден.'
+    );
+
     return;
   }
 
@@ -640,6 +279,14 @@ function createMainMap() {
   );
 
 
+  /*
+     Клик по основной карте.
+
+     Если включён режим выбора места,
+     точка ставится именно туда,
+     куда нажал пользователь.
+  */
+
   map.events.add(
     'click',
     event => {
@@ -657,13 +304,16 @@ function createMainMap() {
   );
 
 
+  /*
+     После создания карты немного
+     ждём и обновляем размер.
+  */
+
   setTimeout(
     () => {
-
       try {
         map.container.fitToViewport();
       } catch (_) {}
-
     },
     300
   );
@@ -703,7 +353,7 @@ async function loadJobs() {
 
 
 /* =========================================================
-   МАРКЕРЫ ЗАДАНИЙ
+   ОТОБРАЖЕНИЕ ЗАДАНИЙ НА КАРТЕ
    ========================================================= */
 
 function drawJobs() {
@@ -711,6 +361,11 @@ function drawJobs() {
   if (!map) {
     return;
   }
+
+  /*
+     Не удаляем выбранную пользователем
+     точку, если она существует.
+  */
 
   map.geoObjects.removeAll();
 
@@ -723,6 +378,7 @@ function drawJobs() {
       return;
     }
 
+
     const marker =
       new ymaps.Placemark(
         [
@@ -732,18 +388,12 @@ function drawJobs() {
         {
           balloonContent:
             `
-              <div style="
-                padding:8px;
-                min-width:190px;
-                font-family:Arial,sans-serif
-              ">
+              <div style="padding:8px;min-width:180px">
                 <b>${esc(job.title)}</b>
-                <br><br>
+                <br>
                 <span>${esc(addressOf(job))}</span>
-                <br><br>
-                <strong style="color:#5367c9">
-                  ${money(job.price)}
-                </strong>
+                <br>
+                <strong>${money(job.price)}</strong>
               </div>
             `
         },
@@ -756,10 +406,12 @@ function drawJobs() {
         }
       );
 
+
     marker.events.add(
       'click',
       () => openJob(job.id)
     );
+
 
     map.geoObjects.add(
       marker
@@ -767,6 +419,11 @@ function drawJobs() {
 
   });
 
+
+  /*
+     Возвращаем пользовательскую
+     выбранную точку поверх заданий.
+  */
 
   if (mainSelectedMarker) {
 
@@ -793,21 +450,28 @@ function setMainMapPoint(coords) {
     Number(coords[1])
   ];
 
+
+  /*
+     Удаляем старый маркер.
+  */
+
   if (
     mainSelectedMarker &&
     map
   ) {
 
     try {
-
       map.geoObjects.remove(
         mainSelectedMarker
       );
-
     } catch (_) {}
 
   }
 
+
+  /*
+     Создаём красивый маркер.
+  */
 
   mainSelectedMarker =
     new ymaps.Placemark(
@@ -831,6 +495,11 @@ function setMainMapPoint(coords) {
   );
 
 
+  /*
+     Центрируем карту на выбранной
+     точке.
+  */
+
   map.setCenter(
     selectedCoords,
     Math.max(
@@ -842,6 +511,10 @@ function setMainMapPoint(coords) {
     }
   );
 
+
+  /*
+     Получаем адрес.
+  */
 
   resolveAddress(
     selectedCoords
@@ -875,6 +548,7 @@ function locate() {
     return;
   }
 
+
   navigator.geolocation.getCurrentPosition(
 
     position => {
@@ -883,6 +557,7 @@ function locate() {
         position.coords.latitude,
         position.coords.longitude
       ];
+
 
       if (map) {
 
@@ -895,6 +570,7 @@ function locate() {
         );
 
       }
+
 
       toast(
         'Местоположение найдено'
@@ -940,6 +616,7 @@ function fitJobs() {
     return;
   }
 
+
   try {
 
     map.setBounds(
@@ -957,7 +634,7 @@ function fitJobs() {
 
 
 /* =========================================================
-   КАРТА
+   ПЕРЕХОД НА КАРТУ
    ========================================================= */
 
 function goMap() {
@@ -978,21 +655,20 @@ function goMap() {
 
     setTimeout(
       () => {
-
         try {
           map.container.fitToViewport();
         } catch (_) {}
-
       },
       100
     );
 
   }
+
 }
 
 
 /* =========================================================
-   ЭКРАН ЗАДАНИЙ
+   ЗАДАНИЯ
    ========================================================= */
 
 async function jobs() {
@@ -1009,87 +685,38 @@ async function jobs() {
     'hidden'
   );
 
-  currentSearchQuery = '';
-  currentJobFilter = 'all';
 
   sheet.innerHTML =
     `
-      <div class="jobs-modern">
+      <h2>Задания рядом</h2>
 
-        <div class="jobs-header">
+      <div class="sheet-note">
+        Свежие предложения пользователей Near Gig
+      </div>
 
-          <div>
-            <h2>Задания рядом</h2>
-            <p>
-              Найди подработку и заработай сегодня
-            </p>
-          </div>
-
-          <div
-            class="jobs-count"
-            id="jobsCount"
-          >
-            0
-          </div>
-
-        </div>
-
-
-        <div class="jobs-search">
-
-          <span>⌕</span>
-
-          <input
-            id="jobsSearch"
-            type="search"
-            placeholder="Поиск по заданиям..."
-            autocomplete="off"
-          >
-
-          <button
-            onclick="performJobsSearch()"
-          >
-            Найти
-          </button>
-
-        </div>
-
-
-        <div
-          class="job-filters"
-          id="jobFilters"
-        ></div>
-
-
-        <div
-          class="jobs-list"
-          id="jobList"
-        >
-          <div class="jobs-empty">
-            Загрузка…
-          </div>
-        </div>
-
+      <div id="jobList">
+        Загрузка…
       </div>
     `;
 
 
-  setupJobsSearch();
-
   await loadCacheIfNeeded();
 
-  renderModernJobs();
-
+  renderList(
+    jobsCache
+  );
 }
 
 
 /* =========================================================
-   КЭШ
+   КЭШ ЗАДАНИЙ
    ========================================================= */
 
 async function loadCacheIfNeeded() {
 
-  if (jobsCache.length) {
+  if (
+    jobsCache.length
+  ) {
     return;
   }
 
@@ -1115,361 +742,7 @@ async function loadCacheIfNeeded() {
 
 
 /* =========================================================
-   КАТЕГОРИИ
-   ========================================================= */
-
-function getCategories() {
-
-  const categories = [
-    'all'
-  ];
-
-  jobsCache.forEach(job => {
-
-    const category =
-      job.category ||
-      'Другое';
-
-    if (
-      !categories.includes(
-        category
-      )
-    ) {
-
-      categories.push(
-        category
-      );
-
-    }
-
-  });
-
-  return categories;
-}
-
-
-function renderFilters() {
-
-  const container =
-    $('jobFilters');
-
-  if (!container) {
-    return;
-  }
-
-  container.innerHTML =
-    getCategories()
-      .map(category => {
-
-        const active =
-          currentJobFilter === category
-            ? 'active'
-            : '';
-
-        const title =
-          category === 'all'
-            ? 'Все'
-            : category;
-
-        return `
-          <button
-            class="job-filter ${active}"
-            onclick="setJobFilter('${esc(category)}')"
-          >
-            ${esc(title)}
-          </button>
-        `;
-
-      })
-      .join('');
-}
-
-
-function setJobFilter(category) {
-
-  currentJobFilter =
-    category;
-
-  renderFilters();
-
-  renderModernJobs();
-
-}
-
-
-/* =========================================================
-   ПОИСК ЗАДАНИЙ
-   ========================================================= */
-
-function setupJobsSearch() {
-
-  const input =
-    $('jobsSearch');
-
-  if (!input) {
-    return;
-  }
-
-  input.addEventListener(
-    'input',
-    () => {
-
-      currentSearchQuery =
-        input.value
-          .trim()
-          .toLowerCase();
-
-      renderModernJobs();
-
-    }
-  );
-
-
-  input.addEventListener(
-    'keydown',
-    event => {
-
-      if (
-        event.key === 'Enter'
-      ) {
-
-        performJobsSearch();
-
-      }
-
-    }
-  );
-
-}
-
-
-function performJobsSearch() {
-
-  const input =
-    $('jobsSearch');
-
-  currentSearchQuery =
-    input
-      ? input.value
-          .trim()
-          .toLowerCase()
-      : '';
-
-  renderModernJobs();
-
-}
-
-
-/* =========================================================
-   ФИЛЬТРАЦИЯ
-   ========================================================= */
-
-function getFilteredJobs() {
-
-  return jobsCache.filter(job => {
-
-    const category =
-      job.category ||
-      'Другое';
-
-    if (
-      currentJobFilter !== 'all' &&
-      category !== currentJobFilter
-    ) {
-      return false;
-    }
-
-    if (!currentSearchQuery) {
-      return true;
-    }
-
-    const text =
-      [
-        job.title,
-        job.description,
-        job.category,
-        job.address,
-        job.location
-      ]
-        .join(' ')
-        .toLowerCase();
-
-    return text.includes(
-      currentSearchQuery
-    );
-
-  });
-
-}
-
-
-/* =========================================================
-   СОВРЕМЕННЫЙ СПИСОК
-   ========================================================= */
-
-function renderModernJobs() {
-
-  const container =
-    $('jobList');
-
-  if (!container) {
-    return;
-  }
-
-  renderFilters();
-
-  const list =
-    getFilteredJobs();
-
-  const count =
-    $('jobsCount');
-
-  if (count) {
-    count.textContent =
-      list.length;
-  }
-
-
-  if (!list.length) {
-
-    container.innerHTML =
-      `
-        <div class="jobs-empty">
-
-          <div class="jobs-empty-icon">
-            🔎
-          </div>
-
-          <b>
-            Ничего не нашли
-          </b>
-
-          <span>
-            Попробуй изменить поиск или категорию.
-          </span>
-
-        </div>
-      `;
-
-    return;
-  }
-
-
-  container.innerHTML =
-    list
-      .map(modernJobCard)
-      .join('');
-
-}
-
-
-/* =========================================================
-   КАРТОЧКА
-   ========================================================= */
-
-function categoryIcon(category) {
-
-  const icons = {
-
-    'Курьер': '🚴',
-
-    'Уборка': '🧹',
-
-    'Ремонт': '🔧',
-
-    'IT': '💻',
-
-    'Помощь по дому': '🏠',
-
-    'Другое': '✦'
-
-  };
-
-  return icons[category] || '✦';
-}
-
-
-function modernJobCard(job) {
-
-  const category =
-    job.category ||
-    'Другое';
-
-  const description =
-    job.description ||
-    'Без описания';
-
-
-  const distance =
-    job.distance != null
-      ? `
-        <span class="modern-job-chip">
-          📍 ${Number(job.distance).toFixed(1)} км
-        </span>
-      `
-      : '';
-
-
-  return `
-    <article
-      class="modern-job-card"
-      onclick="openJob(${Number(job.id)})"
-    >
-
-      <div class="modern-job-top">
-
-        <div class="modern-job-icon">
-          ${categoryIcon(category)}
-        </div>
-
-        <div class="modern-job-main">
-
-          <div class="modern-job-title">
-            ${esc(job.title)}
-          </div>
-
-          <div class="modern-job-category">
-            ${esc(category)}
-          </div>
-
-        </div>
-
-      </div>
-
-
-      <div class="modern-job-price">
-        ${money(job.price)}
-      </div>
-
-
-      <div class="modern-job-description">
-        ${esc(description)}
-      </div>
-
-
-      <div class="modern-job-meta">
-
-        <span class="modern-job-chip">
-          ${categoryIcon(category)}
-          ${esc(category)}
-        </span>
-
-        ${distance}
-
-        <span class="modern-job-chip">
-          📍 ${esc(addressOf(job))}
-        </span>
-
-      </div>
-
-    </article>
-  `;
-}
-
-
-/* =========================================================
-   СТАРЫЙ RENDER LIST
-   Оставляем для совместимости
+   СПИСОК
    ========================================================= */
 
 function renderList(list) {
@@ -1481,30 +754,100 @@ function renderList(list) {
     return;
   }
 
+
   if (!list.length) {
 
     container.innerHTML =
       `
-        <div class="jobs-empty">
-          <div class="jobs-empty-icon">🔎</div>
-          <b>Подходящих заданий пока нет</b>
-          <span>Попробуй посмотреть другие категории.</span>
+        <div class="muted">
+          Подходящих заданий пока нет.
         </div>
       `;
 
     return;
   }
 
+
   container.innerHTML =
     list
-      .map(modernJobCard)
+      .map(jobCard)
       .join('');
-
 }
 
 
 /* =========================================================
-   ГЛОБАЛЬНЫЙ ПОИСК В ШАПКЕ
+   КАРТОЧКА ЗАДАНИЯ
+   ========================================================= */
+
+function jobCard(job) {
+
+  return `
+    <article
+      class="job-card"
+      onclick="openJob(${Number(job.id)})"
+    >
+
+      <div class="job-line">
+
+        <div class="job-title">
+          ${esc(job.title)}
+        </div>
+
+        <div class="price">
+          ${money(job.price)}
+        </div>
+
+      </div>
+
+
+      <div
+        class="muted"
+        style="margin-top:7px"
+      >
+        ${esc(
+          job.description ||
+          'Без описания'
+        )}
+      </div>
+
+
+      <div class="chips">
+
+        <span class="chip">
+          ${esc(
+            job.category ||
+            'Другое'
+          )}
+        </span>
+
+        <span class="chip">
+          ⌖ ${esc(
+            addressOf(job)
+          )}
+        </span>
+
+        ${
+          job.distance != null
+            ? `
+              <span class="chip">
+                ${Number(
+                  job.distance
+                ).toFixed(1)}
+                км
+              </span>
+            `
+            : ''
+        }
+
+      </div>
+
+    </article>
+  `;
+}
+
+
+/* =========================================================
+   ПОИСК
    ========================================================= */
 
 async function search() {
@@ -1516,6 +859,7 @@ async function search() {
     return;
   }
 
+
   const query =
     input.value
       .trim()
@@ -1526,6 +870,7 @@ async function search() {
 
   setNav('njobs');
 
+
   const sheet =
     $('sheet');
 
@@ -1533,86 +878,91 @@ async function search() {
     return;
   }
 
+
   sheet.classList.remove(
     'hidden'
   );
 
 
-  currentSearchQuery =
-    query;
-
-  currentJobFilter =
-    'all';
-
-
   sheet.innerHTML =
     `
-      <div class="jobs-modern">
+      <h2>Поиск</h2>
 
-        <div class="jobs-header">
-
-          <div>
-            <h2>
-              ${query ? 'Результаты поиска' : 'Задания рядом'}
-            </h2>
-
-            <p>
-              ${query
-                ? `Поиск: «${esc(query)}»`
-                : 'Все доступные задания'
-              }
-            </p>
-          </div>
-
-          <div
-            class="jobs-count"
-            id="jobsCount"
-          >
-            0
-          </div>
-
-        </div>
-
-
-        <div class="jobs-search">
-
-          <span>⌕</span>
-
-          <input
-            id="jobsSearch"
-            type="search"
-            value="${esc(query)}"
-            placeholder="Поиск по заданиям..."
-            autocomplete="off"
-          >
-
-          <button
-            onclick="performJobsSearch()"
-          >
-            Найти
-          </button>
-
-        </div>
-
-
-        <div
-          class="job-filters"
-          id="jobFilters"
-        ></div>
-
-
-        <div
-          class="jobs-list"
-          id="jobList"
-        ></div>
-
+      <div class="sheet-note">
+        Результаты по названию,
+        описанию и категории
       </div>
+
+      <div id="jobList"></div>
     `;
 
 
-  setupJobsSearch();
+  if (!query) {
 
-  renderModernJobs();
+    renderList(
+      jobsCache
+    );
+
+    return;
+  }
+
+
+  const result =
+    jobsCache.filter(
+      job => {
+
+        const text =
+          [
+            job.title,
+            job.description,
+            job.category,
+            job.address
+          ]
+            .join(' ')
+            .toLowerCase();
+
+        return text.includes(
+          query
+        );
+
+      }
+    );
+
+
+  renderList(
+    result
+  );
+}
+
+
+/* =========================================================
+   ENTER В ПОИСКЕ
+   ========================================================= */
+
+function setupSearch() {
+
+  const input =
+    $('q');
+
+  if (!input) {
+    return;
+  }
+
+
+  input.addEventListener(
+    'keydown',
+    event => {
+
+      if (
+        event.key === 'Enter'
+      ) {
+
+        search();
+
+      }
+
+    }
+  );
 
 }
 
@@ -1625,6 +975,7 @@ function create() {
 
   setNav('ncreate');
 
+
   if (!currentUser) {
 
     openAuth();
@@ -1632,16 +983,21 @@ function create() {
     return;
   }
 
+
   selectedCoords = null;
   selectedAddress = '';
+
 
   const address =
     $('addr');
 
   if (address) {
+
     address.textContent =
       'Точка не выбрана';
+
   }
+
 
   $('createM')
     ?.classList
@@ -1651,12 +1007,13 @@ function create() {
 
 
 /* =========================================================
-   PICKER
+   ОТКРЫТЬ ВЫБОР МЕСТА
    ========================================================= */
 
 function pick() {
 
   closeM('createM');
+
 
   const picker =
     $('picker');
@@ -1665,24 +1022,34 @@ function pick() {
     return;
   }
 
+
   picker.classList.remove(
     'hidden'
   );
 
+
   pickerAddress =
     'Нажмите на карту';
 
+
   pickerCoords =
     null;
+
 
   const pa =
     $('pa');
 
   if (pa) {
+
     pa.textContent =
       'Нажмите на карту';
+
   }
 
+
+  /*
+     Создаём карту только один раз.
+  */
 
   setTimeout(
     () => {
@@ -1715,6 +1082,17 @@ function pick() {
           );
 
 
+        /*
+           САМОЕ ВАЖНОЕ:
+
+           Пользователь нажимает
+           пальцем или мышкой
+           в конкретную точку.
+
+           Маркер появляется именно
+           в этой точке.
+        */
+
         pickerMap.events.add(
           'click',
           event => {
@@ -1731,6 +1109,11 @@ function pick() {
           }
         );
 
+
+        /*
+           При изменении размера
+           обновляем карту.
+        */
 
         setTimeout(
           () => {
@@ -1753,6 +1136,7 @@ function pick() {
           .container
           .fitToViewport();
 
+
         pickerMap.setCenter(
           center,
           15,
@@ -1771,7 +1155,7 @@ function pick() {
 
 
 /* =========================================================
-   ВЫБОР ТОЧКИ
+   ВЫБОР ТОЧКИ В PICKER
    ========================================================= */
 
 function selectPickerPoint(
@@ -1782,11 +1166,16 @@ function selectPickerPoint(
     return;
   }
 
+
   pickerCoords = [
     Number(coords[0]),
     Number(coords[1])
   ];
 
+
+  /*
+     Удаляем старый маркер.
+  */
 
   if (pickerMarker) {
 
@@ -1800,6 +1189,11 @@ function selectPickerPoint(
 
   }
 
+
+  /*
+     Создаём новый маркер
+     ТОЧНО в месте клика.
+  */
 
   pickerMarker =
     new ymaps.Placemark(
@@ -1823,14 +1217,24 @@ function selectPickerPoint(
   );
 
 
+  /*
+     Обновляем текст.
+  */
+
   const pa =
     $('pa');
 
   if (pa) {
+
     pa.textContent =
       'Определяем адрес…';
+
   }
 
+
+  /*
+     Получаем адрес.
+  */
 
   resolveAddress(
     pickerCoords
@@ -1839,9 +1243,12 @@ function selectPickerPoint(
     pickerAddress =
       address;
 
+
     if (pa) {
+
       pa.textContent =
         address;
+
     }
 
   });
@@ -1864,10 +1271,12 @@ async function resolveAddress(
         coords
       );
 
+
     const object =
       result.geoObjects.get(
         0
       );
+
 
     if (object) {
 
@@ -1875,6 +1284,7 @@ async function resolveAddress(
         .getAddressLine();
 
     }
+
 
     return `
       Точка
@@ -1910,28 +1320,36 @@ function confirmPick() {
     return;
   }
 
+
   selectedCoords = [
     Number(pickerCoords[0]),
     Number(pickerCoords[1])
   ];
 
+
   selectedAddress =
     pickerAddress ||
     'Точка на карте';
+
 
   const address =
     $('addr');
 
   if (address) {
+
     address.textContent =
       selectedAddress;
+
   }
 
+
   closePick();
+
 
   $('createM')
     ?.classList
     .remove('hidden');
+
 
   toast(
     'Место выбрано'
@@ -1941,7 +1359,7 @@ function confirmPick() {
 
 
 /* =========================================================
-   ЗАКРЫТЬ PICKER
+   ЗАКРЫТИЕ PICKER
    ========================================================= */
 
 function closePick() {
@@ -1957,6 +1375,16 @@ function closePick() {
 
   }
 
+
+  /*
+     Важно:
+
+     pickerMap НЕ уничтожаем.
+
+     Это позволяет повторно открыть
+     карту намного быстрее.
+  */
+
 }
 
 
@@ -1965,14 +1393,6 @@ function closePick() {
    ========================================================= */
 
 async function saveJob() {
-
-  if (!currentUser) {
-
-    openAuth();
-
-    return;
-  }
-
 
   if (!selectedCoords) {
 
@@ -2026,37 +1446,40 @@ async function saveJob() {
       {
         method: 'POST',
 
-        body:
-          JSON.stringify(
-            {
-              title,
+        body: JSON.stringify(
+          {
+            title,
 
-              description:
-                $('jd')
-                  ?.value
-                  .trim() ||
-                '',
+            description:
+              $('jd')
+                ?.value
+                .trim() ||
+              '',
 
-              price,
+            price,
 
-              category:
-                $('jc')
-                  ?.value ||
-                'Другое',
+            category:
+              $('jc')
+                ?.value ||
+              'Другое',
 
-              lat:
-                selectedCoords[0],
+            lat:
+              selectedCoords[0],
 
-              lng:
-                selectedCoords[1],
+            lng:
+              selectedCoords[1],
 
-              address:
-                selectedAddress
-            }
-          )
+            address:
+              selectedAddress
+          }
+        )
       }
     );
 
+
+    /*
+       Очищаем форму.
+    */
 
     if ($('jt')) {
       $('jt').value = '';
@@ -2082,18 +1505,26 @@ async function saveJob() {
       $('addr');
 
     if (address) {
+
       address.textContent =
         'Точка не выбрана';
+
     }
 
 
     closeM('createM');
+
+
+    /*
+       Обновляем задания.
+    */
 
     jobsCache = [];
 
     await loadJobs();
 
     goMap();
+
 
     toast(
       'Задание опубликовано'
@@ -2144,109 +1575,87 @@ async function openJob(id) {
 
     let html =
       `
-        <div class="modern-detail">
+        <div class="profile-hero">
 
-          <div class="profile-hero">
+          ${
+            author.avatar_url
+              ? `
+                <img
+                  class="avatar"
+                  src="${esc(
+                    author.avatar_url
+                  )}"
+                  onerror="
+                    this.style.display='none'
+                  "
+                >
+              `
+              : ''
+          }
 
-            ${
-              author.avatar_url
-                ? `
-                  <img
-                    class="avatar"
-                    src="${esc(
-                      author.avatar_url
-                    )}"
-                    onerror="
-                      this.style.display='none'
-                    "
-                  >
-                `
-                : ''
-            }
+          <div>
 
-            <div>
-
-              <b>
-                ${esc(
-                  author.name ||
-                  job.author_name ||
-                  'Пользователь'
-                )}
-              </b>
-
-              <div class="muted">
-                ★
-                ${Number(
-                  author.rating ??
-                  job.author_rating ??
-                  0
-                ).toFixed(1)}
-              </div>
-
-            </div>
-
-          </div>
-
-
-          <div class="detail-price-box">
-
-            <div>
-              <span>Оплата</span>
-              <div>
-                <b>
-                  ${money(job.price)}
-                </b>
-              </div>
-            </div>
-
-            <div>
-              <span>Категория</span>
-              <div>
-                <b style="
-                  font-size:14px;
-                  color:inherit
-                ">
-                  ${esc(
-                    job.category ||
-                    'Другое'
-                  )}
-                </b>
-              </div>
-            </div>
-
-          </div>
-
-
-          <div class="detail-section">
-
-            <div class="detail-section-title">
-              Описание
-            </div>
-
-            <div class="detail-description">
+            <b>
               ${esc(
-                job.description ||
-                'Заказчик не добавил описание.'
+                author.name ||
+                job.author_name ||
+                'Пользователь'
               )}
+            </b>
+
+            <div class="muted">
+              ★
+              ${Number(
+                author.rating ??
+                job.author_rating ??
+                0
+              ).toFixed(1)}
             </div>
 
           </div>
 
+          <div
+            style="margin-left:auto"
+            class="price"
+          >
+            ${money(job.price)}
+          </div>
 
-          <div class="detail-section">
+        </div>
 
-            <div class="detail-section-title">
-              Место
-            </div>
 
-            <div>
-              📍 ${esc(
+        <div
+          class="job-card"
+          style="cursor:default"
+        >
+
+          <div>
+            ${esc(
+              job.description ||
+              'Без описания'
+            )}
+          </div>
+
+
+          <div class="chips">
+
+            <span class="chip">
+              ${esc(
+                job.category ||
+                'Другое'
+              )}
+            </span>
+
+            <span class="chip">
+              ⌖
+              ${esc(
                 addressOf(job)
               )}
-            </div>
+            </span>
 
           </div>
 
+        </div>
       `;
 
 
@@ -2257,25 +1666,25 @@ async function openJob(id) {
 
       html +=
         `
-          <div class="detail-actions">
-
-            <button
-              class="secondary"
-              onclick="
-                focusJob(
-                  ${Number(job.lat)},
-                  ${Number(job.lng)}
-                )
-              "
-            >
-              📍 Показать на карте
-            </button>
-
-          </div>
+          <button
+            class="secondary"
+            onclick="
+              focusJob(
+                ${Number(job.lat)},
+                ${Number(job.lng)}
+              )
+            "
+          >
+            Показать на карте
+          </button>
         `;
 
     }
 
+
+    /*
+       Отклик.
+    */
 
     if (
       currentUser &&
@@ -2286,35 +1695,37 @@ async function openJob(id) {
 
       html +=
         `
-          <div class="detail-actions">
+          <div style="height:9px"></div>
 
-            <button
-              class="primary"
-              onclick="
-                respondTo(
-                  ${Number(job.id)}
-                )
-              "
-            >
-              Откликнуться
-            </button>
+          <button
+            class="primary"
+            onclick="
+              respondTo(
+                ${Number(job.id)}
+              )
+            "
+          >
+            Откликнуться
+          </button>
 
-            <button
-              class="ghost"
-              onclick="
-                toggleFavorite(
-                  ${Number(job.id)}
-                )
-              "
-            >
-              ♡ Добавить в избранное
-            </button>
-
-          </div>
+          <button
+            class="ghost"
+            onclick="
+              toggleFavorite(
+                ${Number(job.id)}
+              )
+            "
+          >
+            ♡ Добавить в избранное
+          </button>
         `;
 
     }
 
+
+    /*
+       Удаление своего задания.
+    */
 
     if (
       currentUser &&
@@ -2324,34 +1735,31 @@ async function openJob(id) {
 
       html +=
         `
-          <div class="detail-actions">
+          <div style="height:9px"></div>
 
-            <button
-              class="ghost"
-              onclick="
-                deleteJob(
-                  ${Number(job.id)}
-                )
-              "
-            >
-              Удалить задание
-            </button>
-
-          </div>
+          <button
+            class="ghost"
+            onclick="
+              deleteJob(
+                ${Number(job.id)}
+              )
+            "
+          >
+            Удалить задание
+          </button>
         `;
 
     }
-
-
-    html += `</div>`;
 
 
     const content =
       $('dc');
 
     if (content) {
+
       content.innerHTML =
         html;
+
     }
 
 
@@ -2384,6 +1792,7 @@ function focusJob(
 
   goMap();
 
+
   if (map) {
 
     map.setCenter(
@@ -2408,14 +1817,6 @@ function focusJob(
 
 async function respondTo(id) {
 
-  if (!currentUser) {
-
-    openAuth();
-
-    return;
-  }
-
-
   const message =
     prompt(
       'Сообщение заказчику (необязательно):'
@@ -2431,12 +1832,11 @@ async function respondTo(id) {
       {
         method: 'POST',
 
-        body:
-          JSON.stringify(
-            {
-              message
-            }
-          )
+        body: JSON.stringify(
+          {
+            message
+          }
+        )
       }
     );
 
@@ -2461,7 +1861,9 @@ async function respondTo(id) {
    ИЗБРАННОЕ
    ========================================================= */
 
-async function toggleFavorite(id) {
+async function toggleFavorite(
+  id
+) {
 
   if (!currentUser) {
 
@@ -2502,7 +1904,7 @@ async function toggleFavorite(id) {
 
 
 /* =========================================================
-   ИЗБРАННОЕ — ЭКРАН
+   ПРОСМОТР ИЗБРАННОГО
    ========================================================= */
 
 async function favoritesView() {
@@ -2516,6 +1918,7 @@ async function favoritesView() {
 
 
   setNav('nfav');
+
 
   const sheet =
     $('sheet');
@@ -2532,34 +1935,14 @@ async function favoritesView() {
 
   sheet.innerHTML =
     `
-      <div class="jobs-modern">
+      <h2>Избранное</h2>
 
-        <div class="jobs-header">
+      <div class="sheet-note">
+        Сохранённые задания
+      </div>
 
-          <div>
-            <h2>Избранное</h2>
-            <p>
-              Задания, которые ты сохранил
-            </p>
-          </div>
-
-          <div
-            class="jobs-count"
-            id="jobsCount"
-          >
-            0
-          </div>
-
-        </div>
-
-
-        <div
-          class="jobs-list"
-          id="jobList"
-        >
-          Загрузка…
-        </div>
-
+      <div id="jobList">
+        Загрузка…
       </div>
     `;
 
@@ -2571,17 +1954,9 @@ async function favoritesView() {
         '/api/favorites'
       );
 
+
     const list =
       normalizeJobs(data);
-
-
-    const count =
-      $('jobsCount');
-
-    if (count) {
-      count.textContent =
-        list.length;
-    }
 
 
     renderList(
@@ -2595,13 +1970,10 @@ async function favoritesView() {
       $('jobList');
 
     if (list) {
-      list.innerHTML =
-        `
-          <div class="jobs-empty">
-            <b>Не удалось загрузить избранное</b>
-            <span>${esc(error.message)}</span>
-          </div>
-        `;
+
+      list.textContent =
+        error.message;
+
     }
 
   }
@@ -2613,7 +1985,9 @@ async function favoritesView() {
    УДАЛЕНИЕ ЗАДАНИЯ
    ========================================================= */
 
-async function deleteJob(id) {
+async function deleteJob(
+  id
+) {
 
   if (
     !confirm(
@@ -2637,9 +2011,12 @@ async function deleteJob(id) {
 
     closeM('detail');
 
+
     jobsCache = [];
 
+
     await loadJobs();
+
 
     toast(
       'Задание удалено'
@@ -2686,8 +2063,10 @@ function openAuth() {
     $('at');
 
   if (title) {
+
     title.textContent =
       'Вход';
+
   }
 
 
@@ -2705,7 +2084,7 @@ function openAuth() {
 
 
 /* =========================================================
-   ВХОД / РЕГИСТРАЦИЯ
+   ПЕРЕКЛЮЧЕНИЕ ВХОД / РЕГИСТРАЦИЯ
    ========================================================= */
 
 function toggleAuth() {
@@ -2757,6 +2136,11 @@ function toggleAuth() {
 
   }
 
+
+  /*
+     Поля регистрации создаём
+     только один раз.
+  */
 
   if (
     authMode === 'register'
@@ -2833,7 +2217,6 @@ function toggleAuth() {
               <option value="customer">
                 Заказчик
               </option>
-
             </select>
           </label>
 
@@ -2980,19 +2363,19 @@ async function doLogin() {
         {
           method: 'POST',
 
-          body:
-            JSON.stringify(
-              {
-                email,
-                password
-              }
-            )
+          body: JSON.stringify(
+            {
+              email,
+              password
+            }
+          )
         }
       );
 
 
     token =
       result.token;
+
 
     currentUser =
       result.user ||
@@ -3151,6 +2534,7 @@ async function doReg() {
     token =
       result.token;
 
+
     currentUser =
       result.user ||
       result;
@@ -3191,12 +2575,14 @@ async function restoreUser() {
     return;
   }
 
+
   try {
 
     currentUser =
       await api(
         '/api/me'
       );
+
 
   } catch (_) {
 
@@ -3283,35 +2669,50 @@ async function profile() {
       <div class="stats">
 
         <div class="stat">
+
           <b>
             ${Number(
               currentUser.rating ||
               0
             ).toFixed(1)}
           </b>
-          <span>рейтинг</span>
+
+          <span>
+            рейтинг
+          </span>
+
         </div>
 
 
         <div class="stat">
+
           <b>
             ${
               currentUser.reviews_count ||
               0
             }
           </b>
-          <span>отзывов</span>
+
+          <span>
+            отзывов
+          </span>
+
         </div>
 
 
         <div class="stat">
+
           <b>
             ${
               currentUser.completed_jobs ||
               0
             }
           </b>
-          <span>выполнено</span>
+
+          <span>
+            выполнено
+          </span>
+
         </div>
 
       </div>
@@ -3413,6 +2814,7 @@ async function myJobs() {
 
   closeM('prof');
 
+
   const sheet =
     $('sheet');
 
@@ -3420,44 +2822,24 @@ async function myJobs() {
     return;
   }
 
+
   sheet.classList.remove(
     'hidden'
   );
 
 
-  setNav('njobs');
-
-
   sheet.innerHTML =
     `
-      <div class="jobs-modern">
+      <h2>
+        Мои задания
+      </h2>
 
-        <div class="jobs-header">
+      <div class="sheet-note">
+        Опубликованные тобой задания
+      </div>
 
-          <div>
-            <h2>Мои задания</h2>
-            <p>
-              Опубликованные тобой задания
-            </p>
-          </div>
-
-          <div
-            class="jobs-count"
-            id="jobsCount"
-          >
-            0
-          </div>
-
-        </div>
-
-
-        <div
-          class="jobs-list"
-          id="jobList"
-        >
-          Загрузка…
-        </div>
-
+      <div id="jobList">
+        Загрузка…
       </div>
     `;
 
@@ -3473,21 +2855,8 @@ async function myJobs() {
       );
 
 
-    const list =
-      normalizeJobs(data);
-
-
-    const count =
-      $('jobsCount');
-
-    if (count) {
-      count.textContent =
-        list.length;
-    }
-
-
     renderList(
-      list
+      normalizeJobs(data)
     );
 
 
@@ -3498,13 +2867,8 @@ async function myJobs() {
 
     if (list) {
 
-      list.innerHTML =
-        `
-          <div class="jobs-empty">
-            <b>Ошибка загрузки</b>
-            <span>${esc(error.message)}</span>
-          </div>
-        `;
+      list.textContent =
+        error.message;
 
     }
 
@@ -3535,13 +2899,17 @@ async function logout() {
 
   currentUser = null;
 
+
   localStorage.removeItem(
     'near_token'
   );
 
+
   closeM('prof');
 
+
   setNav('nmap');
+
 
   toast(
     'Вы вышли из аккаунта'
@@ -3564,6 +2932,7 @@ document.addEventListener(
       return;
     }
 
+
     [
       'auth',
       'createM',
@@ -3571,6 +2940,7 @@ document.addEventListener(
       'prof'
     ]
       .forEach(closeM);
+
 
     closePick();
 
