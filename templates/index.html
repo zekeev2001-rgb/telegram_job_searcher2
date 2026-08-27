@@ -3,18 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no">
+
   <meta name="theme-color" content="#5264C7">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}" onerror="this.href='/manifest.json'">
+
+  <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
+
+  <script src="https://api-maps.yandex.ru/2.1/?apikey=27ec90a8-477d-41ac-a054-ba4bdd3bd265&lang=ru_RU"></script>
+
   <title>Near Gig — подработка рядом</title>
 </head>
+
 <body>
+
+  <!-- КАРТА -->
   <div id="map"></div>
 
+
+  <!-- ВЕРХНЯЯ ПАНЕЛЬ -->
   <header class="topbar safe-top">
+
     <button class="brand" onclick="goMap()" aria-label="На карту">
       <span class="brand-mark">N</span>
       <span class="brand-name">Near Gig</span>
@@ -22,79 +32,482 @@
 
     <div class="searchbox">
       <span class="search-icon">⌕</span>
-      <input id="q" placeholder="Найти подработку..." autocomplete="off" enterkeyhint="search">
+
+      <input
+        id="q"
+        placeholder="Найти подработку..."
+        autocomplete="off"
+        enterkeyhint="search"
+      >
+
       <button onclick="search()">Найти</button>
     </div>
 
-    <button class="round-btn" onclick="locate()" aria-label="Моё местоположение">⌖</button>
+    <button
+      class="round-btn"
+      onclick="locate()"
+      aria-label="Моё местоположение"
+    >
+      ⌖
+    </button>
+
   </header>
 
+
+  <!-- ГЛАВНАЯ КАРТОЧКА -->
   <section class="hero-card">
-    <div class="hero-kicker"><span class="hero-dot"></span> ПОДРАБОТКА РЯДОМ</div>
-    <h1>Найди дело.<br><em>Заработай сегодня.</em></h1>
-    <p>Задания поблизости — без лишних шагов.</p>
-    <div class="hero-actions">
-      <button class="hero-primary" onclick="jobs()">Смотреть задания <span>→</span></button>
-      <button class="hero-secondary" onclick="create()">＋ Создать</button>
+
+    <div class="hero-kicker">
+      <span class="hero-dot"></span>
+      ПОДРАБОТКА РЯДОМ
     </div>
+
+    <h1>
+      Найди дело.<br>
+      <em>Заработай сегодня.</em>
+    </h1>
+
+    <p>
+      Задания поблизости — без лишних шагов.
+    </p>
+
+    <div class="hero-actions">
+
+      <button
+        class="hero-primary"
+        onclick="jobs()"
+      >
+        Смотреть задания
+        <span>→</span>
+      </button>
+
+      <button
+        class="hero-secondary"
+        onclick="create()"
+      >
+        ＋ Создать
+      </button>
+
+    </div>
+
   </section>
 
+
+  <!-- ПОДСКАЗКА ВЫБОРА ТОЧКИ -->
   <div id="map-hint" class="map-hint hidden">
-    <span class="pulse-dot"></span><span>Нажмите на карту, чтобы выбрать место</span>
+    <span class="pulse-dot"></span>
+    <span>Нажмите на карту, чтобы выбрать место</span>
   </div>
 
+
+  <!-- СПИСОК ЗАДАНИЙ -->
   <div id="sheet" class="sheet hidden"></div>
 
+
+  <!-- ПЛАВАЮЩИЕ КНОПКИ КАРТЫ -->
   <div class="floating-actions">
-    <button class="map-action" onclick="locate()"><b>⌖</b><span>Где я</span></button>
-    <button class="map-action" onclick="fitJobs()"><b>◎</b><span>Задания</span></button>
+
+    <button
+      class="map-action"
+      onclick="locate()"
+    >
+      <b>⌖</b>
+      <span>Где я</span>
+    </button>
+
+    <button
+      class="map-action"
+      onclick="fitJobs()"
+    >
+      <b>◎</b>
+      <span>Задания</span>
+    </button>
+
   </div>
 
+
+  <!-- НИЖНЯЯ НАВИГАЦИЯ -->
   <nav class="bottom-nav safe-bottom">
-    <button id="nmap" class="active" onclick="goMap()"><span>⌂</span><small>Карта</small></button>
-    <button id="njobs" onclick="jobs()"><span>▤</span><small>Задания</small></button>
-    <button id="ncreate" class="create-btn" onclick="create()"><span>＋</span><small>Создать</small></button>
-    <button id="nfav" onclick="favoritesView()"><span>♡</span><small>Избранное</small></button>
-    <button id="nprof" onclick="profile()"><span>◯</span><small>Профиль</small></button>
+
+    <button
+      id="nmap"
+      class="active"
+      onclick="goMap()"
+    >
+      <span>⌂</span>
+      <small>Карта</small>
+    </button>
+
+    <button
+      id="njobs"
+      onclick="jobs()"
+    >
+      <span>▤</span>
+      <small>Задания</small>
+    </button>
+
+    <button
+      id="ncreate"
+      class="create-btn"
+      onclick="create()"
+    >
+      <span>＋</span>
+      <small>Создать</small>
+    </button>
+
+    <button
+      id="nfav"
+      onclick="favoritesView()"
+    >
+      <span>♡</span>
+      <small>Избранное</small>
+    </button>
+
+    <button
+      id="nprof"
+      onclick="profile()"
+    >
+      <span>◯</span>
+      <small>Профиль</small>
+    </button>
+
   </nav>
 
+
+  <!-- УВЕДОМЛЕНИЕ -->
   <div id="toast" class="toast"></div>
 
+
+  <!-- АВТОРИЗАЦИЯ -->
   <div id="auth" class="modal hidden">
+
     <div class="modalbox authbox">
-      <div class="modalhead"><div><div class="eyebrow">NEAR GIG</div><h2 id="at">Вход</h2></div><button class="close" onclick="closeM('auth')">×</button></div>
-      <div id="login">
-        <label>Email<input id="le" class="field" type="email" autocomplete="email" placeholder="you@example.com"></label>
-        <label>Пароль<input id="lp" class="field" type="password" autocomplete="current-password" placeholder="••••••••"></label>
-        <button class="primary" onclick="doLogin()">Войти</button>
+
+      <div class="modalhead">
+
+        <div>
+          <div class="eyebrow">NEAR GIG</div>
+          <h2 id="at">Вход</h2>
+        </div>
+
+        <button
+          class="close"
+          onclick="closeM('auth')"
+        >
+          ×
+        </button>
+
       </div>
-      <div id="reg" class="hidden"><div id="rf"></div><button class="primary" onclick="doReg()">Создать аккаунт</button></div>
-      <button class="ghost" onclick="toggleAuth()" id="authSwitch">Нет аккаунта? Зарегистрироваться</button>
+
+
+      <!-- ВХОД -->
+      <div id="login">
+
+        <label>
+          Email
+
+          <input
+            id="le"
+            class="field"
+            type="email"
+            autocomplete="email"
+            placeholder="you@example.com"
+          >
+        </label>
+
+
+        <label>
+          Пароль
+
+          <input
+            id="lp"
+            class="field"
+            type="password"
+            autocomplete="current-password"
+            placeholder="••••••••"
+          >
+        </label>
+
+
+        <button
+          class="primary"
+          onclick="doLogin()"
+        >
+          Войти
+        </button>
+
+      </div>
+
+
+      <!-- РЕГИСТРАЦИЯ -->
+      <div id="reg" class="hidden">
+
+        <div id="rf"></div>
+
+        <button
+          class="primary"
+          onclick="doReg()"
+        >
+          Создать аккаунт
+        </button>
+
+      </div>
+
+
+      <button
+        class="ghost"
+        onclick="toggleAuth()"
+        id="authSwitch"
+      >
+        Нет аккаунта? Зарегистрироваться
+      </button>
+
     </div>
+
   </div>
 
+
+  <!-- СОЗДАНИЕ ЗАДАНИЯ -->
   <div id="createM" class="modal hidden">
+
     <div class="modalbox">
-      <div class="modalhead"><div><div class="eyebrow">НОВАЯ ПОДРАБОТКА</div><h2>Опубликовать задание</h2></div><button class="close" onclick="closeM('createM')">×</button></div>
-      <label>Название<input id="jt" class="field" placeholder="Например: помочь перевезти коробки"></label>
-      <label>Описание<textarea id="jd" class="field" rows="4" placeholder="Опишите задачу и важные детали"></textarea></label>
-      <div class="two-col"><label>Оплата, ₽<input id="jp" class="field" type="number" min="1" inputmode="decimal" placeholder="2500"></label><label>Категория<select id="jc" class="field"><option>Курьер</option><option>Уборка</option><option>Ремонт</option><option>IT</option><option>Помощь по дому</option><option>Другое</option></select></label></div>
-      <div class="location-card"><div class="location-title"><span class="location-icon">⌖</span><div><b>Место выполнения</b><small id="addr">Точка не выбрана</small></div></div><button class="secondary" onclick="pick()">Выбрать на карте</button></div>
-      <button class="primary" onclick="saveJob()">Опубликовать задание</button>
+
+      <div class="modalhead">
+
+        <div>
+          <div class="eyebrow">НОВАЯ ПОДРАБОТКА</div>
+          <h2>Опубликовать задание</h2>
+        </div>
+
+        <button
+          class="close"
+          onclick="closeM('createM')"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <label>
+        Название
+
+        <input
+          id="jt"
+          class="field"
+          placeholder="Например: помочь перевезти коробки"
+        >
+      </label>
+
+
+      <label>
+        Описание
+
+        <textarea
+          id="jd"
+          class="field"
+          rows="4"
+          placeholder="Опишите задачу и важные детали"
+        ></textarea>
+      </label>
+
+
+      <div class="two-col">
+
+        <label>
+          Оплата, ₽
+
+          <input
+            id="jp"
+            class="field"
+            type="number"
+            min="1"
+            inputmode="decimal"
+            placeholder="2500"
+          >
+        </label>
+
+
+        <label>
+          Категория
+
+          <select
+            id="jc"
+            class="field"
+          >
+            <option>Курьер</option>
+            <option>Уборка</option>
+            <option>Ремонт</option>
+            <option>IT</option>
+            <option>Помощь по дому</option>
+            <option>Другое</option>
+          </select>
+        </label>
+
+      </div>
+
+
+      <!-- ВЫБОР МЕСТА -->
+      <div class="location-card">
+
+        <div class="location-title">
+
+          <span class="location-icon">
+            ⌖
+          </span>
+
+          <div>
+
+            <b>Место выполнения</b>
+
+            <small id="addr">
+              Точка не выбрана
+            </small>
+
+          </div>
+
+        </div>
+
+
+        <button
+          class="secondary"
+          onclick="pick()"
+        >
+          Выбрать на карте
+        </button>
+
+      </div>
+
+
+      <button
+        class="primary"
+        onclick="saveJob()"
+      >
+        Опубликовать задание
+      </button>
+
     </div>
+
   </div>
 
-  <div id="detail" class="modal hidden"><div class="modalbox"><div class="modalhead"><div><div class="eyebrow">ПОДРАБОТКА</div><h2 id="dt"></h2></div><button class="close" onclick="closeM('detail')">×</button></div><div id="dc"></div></div></div>
-  <div id="prof" class="modal hidden"><div class="modalbox"><div class="modalhead"><div><div class="eyebrow">АККАУНТ</div><h2>Профиль</h2></div><button class="close" onclick="closeM('prof')">×</button></div><div id="pc"></div></div></div>
 
+  <!-- ДЕТАЛИ ЗАДАНИЯ -->
+  <div id="detail" class="modal hidden">
+
+    <div class="modalbox">
+
+      <div class="modalhead">
+
+        <div>
+          <div class="eyebrow">ПОДРАБОТКА</div>
+          <h2 id="dt"></h2>
+        </div>
+
+        <button
+          class="close"
+          onclick="closeM('detail')"
+        >
+          ×
+        </button>
+
+      </div>
+
+      <div id="dc"></div>
+
+    </div>
+
+  </div>
+
+
+  <!-- ПРОФИЛЬ -->
+  <div id="prof" class="modal hidden">
+
+    <div class="modalbox">
+
+      <div class="modalhead">
+
+        <div>
+          <div class="eyebrow">АККАУНТ</div>
+          <h2>Профиль</h2>
+        </div>
+
+        <button
+          class="close"
+          onclick="closeM('prof')"
+        >
+          ×
+        </button>
+
+      </div>
+
+      <div id="pc"></div>
+
+    </div>
+
+  </div>
+
+
+  <!-- ВЫБОР ТОЧКИ НА КАРТЕ -->
   <div id="picker" class="picker hidden">
+
     <div id="pm"></div>
-    <div class="picker-top safe-top"><button class="round-btn" onclick="closePick()">×</button><div class="picker-title">Выбор места</div><div style="width:45px"></div></div>
-    <div class="picker-cross"><span></span></div>
-    <div class="picker-hint"><span>📍</span> Нажмите на карту — точка появится именно там</div>
-    <div class="picker-actions safe-bottom"><div id="pa">Точка не выбрана</div><button class="primary" onclick="confirmPick()">✓ Подтвердить место</button></div>
+
+
+    <div class="picker-top safe-top">
+
+      <button
+        class="round-btn"
+        onclick="closePick()"
+      >
+        ×
+      </button>
+
+      <div class="picker-title">
+        Выбор места
+      </div>
+
+      <div style="width:45px"></div>
+
+    </div>
+
+
+    <!-- КУРСОР ЦЕНТРА -->
+    <div class="picker-cross">
+
+      <span></span>
+
+    </div>
+
+
+    <div class="picker-hint">
+
+      <span>📍</span>
+
+      Нажмите на карту — точка появится именно там
+
+    </div>
+
+
+    <div class="picker-actions safe-bottom">
+
+      <div id="pa">
+        Точка не выбрана
+      </div>
+
+      <button
+        class="primary"
+        onclick="confirmPick()"
+      >
+        ✓ Подтвердить место
+      </button>
+
+    </div>
+
   </div>
 
+
+  <!-- ОСНОВНОЙ JAVASCRIPT -->
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
 </body>
 </html>
