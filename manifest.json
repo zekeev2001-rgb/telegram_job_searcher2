@@ -1,15 +1,1 @@
-{
-  "name": "Near Gig ",
-  "short_name": "Near Gig",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#2196F3",
-  "icons": [
-    {
-      "src": "https://cdn-icons-png.flaticon.com/512/1041/1041916.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
-}
+{"name":"Near Gig","short_name":"Near Gig","start_url":"/","scope":"/","display":"standalone","orientation":"portrait-primary","theme_color":"#5B67B7","background_color":"#F5F7FB","icons":[{"src":"https://cdn-icons-png.flaticon.com/512/1041/1041916.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}
