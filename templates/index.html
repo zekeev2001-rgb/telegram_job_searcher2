@@ -2,70 +2,190 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no">
-  <meta name="theme-color" content="#5B67B7">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#5062B8">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Near Gig — подработка рядом</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
-  <title>Near Gig — подработка рядом</title>
 </head>
 <body>
-<div id="map"></div>
-<div class="topbar safe-top">
-  <button class="brand" onclick="goMap()"><span class="brand-mark">N</span><span>Near Gig</span></button>
-  <div class="searchbox"><span class="search-icon">⌕</span><input id="q" placeholder="Найти подработку..." autocomplete="off"><button onclick="search()">Найти</button></div>
-  <button class="round-btn" onclick="locate()" aria-label="Моё местоположение">⌖</button>
-</div>
+<div class="app">
+  <div id="map"></div>
 
-<div id="map-hint" class="map-hint hidden"><span class="pulse-dot"></span><span>Выберите точку на карте</span></div>
-<div id="sheet" class="sheet hidden"></div>
+  <header class="topbar safe-top">
+    <button class="brand" onclick="goMap()" aria-label="Near Gig">
+      <span class="brand-mark">N</span>
+      <span class="brand-text">Near Gig</span>
+    </button>
 
-<div class="floating-actions">
-  <button class="map-action" onclick="locate()">⌖<span>Где я</span></button>
-  <button class="map-action" onclick="fitJobs()">◎<span>Задания</span></button>
-</div>
+    <div class="search">
+      <span class="search-symbol">⌕</span>
+      <input id="searchInput" type="search" placeholder="Найти подработку..." autocomplete="off">
+      <button onclick="searchJobs()">Найти</button>
+    </div>
 
-<nav class="bottom-nav safe-bottom">
-  <button id="nmap" class="active" onclick="goMap()"><span>⌂</span><small>Карта</small></button>
-  <button id="njobs" onclick="jobs()"><span>▤</span><small>Задания</small></button>
-  <button id="ncreate" class="create-btn" onclick="create()"><span>＋</span><small>Создать</small></button>
-  <button id="nfav" onclick="favoritesView()"><span>♡</span><small>Избранное</small></button>
-  <button id="nprof" onclick="profile()"><span>◯</span><small>Профиль</small></button>
-</nav>
+    <button class="icon-btn" onclick="locateMe()" aria-label="Моё местоположение">⌖</button>
+  </header>
 
-<div id="toast" class="toast"></div>
+  <section class="intro">
+    <div class="eyebrow">ПОДРАБОТКА РЯДОМ</div>
+    <h1>Найди дело.<br><span>Заработай сегодня.</span></h1>
+    <p>Задания поблизости — без лишних шагов.</p>
+  </section>
 
-<div id="auth" class="modal hidden"><div class="modalbox authbox">
-  <div class="modalhead"><div><div class="eyebrow">NEAR GIG</div><h2 id="at">Вход</h2></div><button class="close" onclick="closeM('auth')">×</button></div>
-  <div id="login">
-    <label>Email<input id="le" class="field" type="email" placeholder="you@example.com"></label>
-    <label>Пароль<input id="lp" class="field" type="password" placeholder="••••••••"></label>
-    <button class="primary" onclick="doLogin()">Войти</button>
+  <div class="map-tools">
+    <button onclick="locateMe()"><b>⌖</b><small>Где я</small></button>
+    <button onclick="showAllOnMap()"><b>◎</b><small>Задания</small></button>
   </div>
-  <div id="reg" class="hidden"><div id="rf"></div><button class="primary" onclick="doReg()">Создать аккаунт</button></div>
-  <button class="ghost" onclick="toggleAuth()" id="authSwitch">Нет аккаунта? Зарегистрироваться</button>
-</div></div>
 
-<div id="createM" class="modal hidden"><div class="modalbox">
-  <div class="modalhead"><div><div class="eyebrow">НОВАЯ ПОДРАБОТКА</div><h2>Опубликовать задание</h2></div><button class="close" onclick="closeM('createM')">×</button></div>
-  <label>Название<input id="jt" class="field" placeholder="Например: помочь перевезти коробки"></label>
-  <label>Описание<textarea id="jd" class="field" rows="4" placeholder="Опишите задачу и важные детали"></textarea></label>
-  <div class="two-col"><label>Оплата, ₽<input id="jp" class="field" type="number" min="1" inputmode="decimal" placeholder="2500"></label><label>Категория<select id="jc" class="field"><option>Курьер</option><option>Уборка</option><option>Ремонт</option><option>IT</option><option>Помощь по дому</option><option>Другое</option></select></label></div>
-  <div class="location-card"><div class="location-title"><span class="location-icon">⌖</span><div><b>Место выполнения</b><small id="addr">Точка не выбрана</small></div></div><button class="secondary" onclick="pick()">Выбрать на карте</button></div>
-  <button class="primary" onclick="saveJob()">Опубликовать задание</button>
-</div></div>
+  <div id="mapMessage" class="map-message hidden">
+    <span class="message-dot"></span>
+    <span>Нажмите на карту, чтобы выбрать место</span>
+  </div>
 
-<div id="detail" class="modal hidden"><div class="modalbox"><div class="modalhead"><div><div class="eyebrow">ПОДРАБОТКА</div><h2 id="dt"></h2></div><button class="close" onclick="closeM('detail')">×</button></div><div id="dc"></div></div></div>
-<div id="prof" class="modal hidden"><div class="modalbox"><div class="modalhead"><div><div class="eyebrow">АККАУНТ</div><h2>Профиль</h2></div><button class="close" onclick="closeM('prof')">×</button></div><div id="pc"></div></div></div>
+  <section id="bottomSheet" class="bottom-sheet hidden"></section>
 
-<div id="picker" class="picker hidden">
-  <div id="pm"></div>
-  <div class="picker-top safe-top"><button class="round-btn" onclick="closePick()">×</button><div class="picker-title">Выбор места</div><div style="width:44px"></div></div>
-  <div class="picker-cross"><span></span></div>
-  <div class="picker-hint">Нажмите на карту — точка появится именно там</div>
-  <div class="picker-actions safe-bottom"><div id="pa">Точка не выбрана</div><button class="primary" onclick="confirmPick()">✓ Подтвердить место</button></div>
+  <nav class="bottom-nav safe-bottom">
+    <button id="navMap" class="active" onclick="goMap()">
+      <span>⌂</span><small>Карта</small>
+    </button>
+    <button id="navJobs" onclick="openJobs()">
+      <span>▤</span><small>Задания</small>
+    </button>
+    <button id="navCreate" class="nav-create" onclick="openCreate()">
+      <i>＋</i><small>Создать</small>
+    </button>
+    <button id="navFav" onclick="openFavorites()">
+      <span>♡</span><small>Избранное</small>
+    </button>
+    <button id="navProfile" onclick="openProfile()">
+      <span>◯</span><small>Профиль</small>
+    </button>
+  </nav>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- AUTH -->
+  <div id="authModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">NEAR GIG</div>
+          <h2 id="authTitle">Вход</h2>
+        </div>
+        <button class="close-btn" onclick="closeModal('authModal')">×</button>
+      </div>
+      <p class="modal-note">Один аккаунт — все твои задания, отклики и избранное.</p>
+
+      <div id="loginForm">
+        <label>Email<input id="loginEmail" class="field" type="email" placeholder="you@example.com"></label>
+        <label>Пароль<input id="loginPassword" class="field" type="password" placeholder="••••••••"></label>
+        <button class="primary" onclick="login()">Войти</button>
+      </div>
+
+      <div id="registerForm" class="hidden">
+        <div id="registerFields"></div>
+        <button class="primary" onclick="register()">Создать аккаунт</button>
+      </div>
+
+      <button id="authSwitch" class="ghost" onclick="switchAuth()">Нет аккаунта? Зарегистрироваться</button>
+    </div>
+  </div>
+
+  <!-- CREATE -->
+  <div id="createModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">НОВАЯ ПОДРАБОТКА</div>
+          <h2>Опубликовать задание</h2>
+        </div>
+        <button class="close-btn" onclick="closeModal('createModal')">×</button>
+      </div>
+
+      <label>Название<input id="jobTitle" class="field" placeholder="Например: помочь перевезти коробки"></label>
+      <label>Описание<textarea id="jobDescription" class="field" rows="4" placeholder="Что нужно сделать?"></textarea></label>
+
+      <div class="two">
+        <label>Оплата, ₽<input id="jobPrice" class="field" type="number" min="1" inputmode="numeric" placeholder="2500"></label>
+        <label>Категория<select id="jobCategory" class="field">
+          <option>Курьер</option>
+          <option>Уборка</option>
+          <option>Ремонт</option>
+          <option>IT</option>
+          <option>Помощь по дому</option>
+          <option>Другое</option>
+        </select></label>
+      </div>
+
+      <div class="location-box">
+        <div class="location-row">
+          <span class="location-icon">⌖</span>
+          <div>
+            <b>Место выполнения</b>
+            <small id="selectedAddress">Точка не выбрана</small>
+          </div>
+        </div>
+        <button class="secondary" onclick="openPicker()">Выбрать точку на карте</button>
+      </div>
+
+      <button class="primary" onclick="publishJob()">Опубликовать</button>
+    </div>
+  </div>
+
+  <!-- DETAIL -->
+  <div id="detailModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">ЗАДАНИЕ</div>
+          <h2 id="detailTitle"></h2>
+        </div>
+        <button class="close-btn" onclick="closeModal('detailModal')">×</button>
+      </div>
+      <div id="detailContent"></div>
+    </div>
+  </div>
+
+  <!-- PROFILE -->
+  <div id="profileModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">АККАУНТ</div>
+          <h2>Профиль</h2>
+        </div>
+        <button class="close-btn" onclick="closeModal('profileModal')">×</button>
+      </div>
+      <div id="profileContent"></div>
+    </div>
+  </div>
+
+  <!-- MAP PICKER -->
+  <div id="picker" class="picker hidden">
+    <div id="pickerMap"></div>
+    <div class="picker-head safe-top">
+      <button class="icon-btn" onclick="closePicker()">×</button>
+      <div class="picker-title">Выбор места</div>
+      <div class="picker-spacer"></div>
+    </div>
+
+    <div class="fixed-pin" aria-hidden="true">
+      <div class="pin-circle"><span></span></div>
+      <div class="pin-line"></div>
+      <div class="pin-shadow"></div>
+    </div>
+
+    <div class="picker-tip">Передвиньте карту так, чтобы нужное место оказалось под точкой</div>
+
+    <div class="picker-footer safe-bottom">
+      <div id="pickerAddress">Определяем адрес…</div>
+      <button class="primary" onclick="confirmPicker()">✓ Подтвердить место</button>
+    </div>
+  </div>
 </div>
 
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
