@@ -74,7 +74,6 @@ function toggleTheme(button) {
    ========================================================= */
 
 async function api(url, options = {}) {
-
   const headers = Object.assign(
     {
       'Content-Type': 'application/json'
@@ -83,28 +82,42 @@ async function api(url, options = {}) {
   );
 
   if (token) {
-    headers.Authorization =
-      'Bearer ' + token;
+    headers.Authorization = 'Bearer ' + token;
   }
 
-  const response = await fetch(
-    url,
-    {
+  let response;
+
+  try {
+    response = await fetch(url, {
       ...options,
       headers
-    }
-  );
+    });
+  } catch (error) {
+    console.error('Near Gig API network error:', error);
+
+    throw new Error(
+      'Не удалось подключиться к серверу. Проверьте соединение.'
+    );
+  }
 
   let data = {};
 
   try {
     data = await response.json();
-  } catch (_) {}
+  } catch (_) {
+    data = {};
+  }
 
   if (!response.ok) {
+    console.error('Near Gig API error:', {
+      url,
+      status: response.status,
+      data
+    });
+
     throw new Error(
       data.error ||
-      'Не удалось выполнить запрос'
+      `Ошибка сервера: HTTP ${response.status}`
     );
   }
 
